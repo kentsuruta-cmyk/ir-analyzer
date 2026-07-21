@@ -12,8 +12,7 @@ const PRESET_QUESTIONS = [
 ];
 
 export default function Home() {
-  const [urls, setUrls] = useState(["", "", ""]);
-  const [documents, setDocuments] = useState([]);
+  const [urls, setUrls] = useState(["", "", "", "", "", ""]);  const [documents, setDocuments] = useState([]);
   const [selected, setSelected] = useState({});
   const [collecting, setCollecting] = useState(false);
   const [notes, setNotes] = useState([]);
