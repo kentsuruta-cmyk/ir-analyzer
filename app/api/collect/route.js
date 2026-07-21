@@ -20,6 +20,7 @@ async function collectPdfLinks(pageUrl) {
   const $ = cheerio.load(html);
   const found = new Map();
 
+  // 1. aタグから探す（表題が取れるので優先）
   $("a").each((_, el) => {
     const href = $(el).attr("href");
     if (!href) return;
@@ -35,10 +36,26 @@ async function collectPdfLinks(pageUrl) {
 
     let label = $(el).text().replace(/\s+/g, " ").trim();
     if (!label) {
-      label = $(el).attr("title") || decodeURIComponent(absolute.split("/").pop());
+      label = $(el).attr("title") || fileNameOf(absolute);
     }
     found.set(absolute, label);
   });
+
+  // 2. HTML全体から .pdf を含む文字列を拾う
+  //    JavaScript用のデータとして埋め込まれている場合に対応
+  const pattern = /["'(]([^"'()\s]+?\.pdf(?:\?[^"'()\s]*)?)["')]/gi;
+  let match;
+  while ((match = pattern.exec(html)) !== null) {
+    let candidate = match[1].replace(/\\\//g, "/");
+    let absolute;
+    try {
+      absolute = new URL(candidate, pageUrl).href;
+    } catch {
+      continue;
+    }
+    if (found.has(absolute)) continue;
+    found.set(absolute, fileNameOf(absolute));
+  }
 
   return Array.from(found, ([url, label]) => ({ url, label }));
 }
