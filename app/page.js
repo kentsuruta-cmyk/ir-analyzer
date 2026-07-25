@@ -172,6 +172,12 @@ export default function Home() {
     setSelected({ ...selected, [id]: !selected[id] });
   }
 
+  function setAllSelected(value) {
+    const next = {};
+    documents.forEach((d) => (next[d.id] = value));
+    setSelected(next);
+  }
+
   function removeDoc(id) {
     setDocuments(documents.filter((d) => d.id !== id));
     const next = { ...selected };
@@ -467,9 +473,17 @@ export default function Home() {
         <div className="card-head">
           <h2 className="card-title">2. 資料棚（{documents.length}件）</h2>
           {documents.length > 0 && (
-            <button onClick={clearAll} className="link-btn">
-              すべて削除
-            </button>
+            <span>
+              <button onClick={() => setAllSelected(true)} className="link-btn">
+                全選択
+              </button>
+              <button onClick={() => setAllSelected(false)} className="link-btn">
+                全解除
+              </button>
+              <button onClick={clearAll} className="link-btn">
+                すべて削除
+              </button>
+            </span>
           )}
         </div>
 
