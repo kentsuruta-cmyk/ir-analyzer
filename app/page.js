@@ -11,12 +11,48 @@ const PRESET_QUESTIONS = [
   "リスク・懸念点を挙げて",
 ];
 
+// 全自動で要約する主要資料を選ぶ。種別ごとに最新年度（同年なら通期優先）を1件ずつ。
+function pickCoreDocs(docs) {
+  const latestOf = (typeIncludes) => {
+    const cands = docs.filter(
+      (d) => d.savedPath && (d.docType || "").includes(typeIncludes)
+    );
+    if (!cands.length) return null;
+    cands.sort((a, b) => {
+      const fy = (b.fiscalYear || "").localeCompare(a.fiscalYear || "");
+      if (fy !== 0) return fy;
+      return (a.quarter === "通期" ? 0 : 1) - (b.quarter === "通期" ? 0 : 1);
+    });
+    return cands[0];
+  };
+  const core = [
+    latestOf("決算短信"),
+    latestOf("決算説明資料"),
+    latestOf("有価証券報告書"),
+  ].filter(Boolean);
+  // 重複除去
+  const seen = new Set();
+  return core.filter((d) => (seen.has(d.url) ? false : (seen.add(d.url), true)));
+}
+
 export default function Home() {
   const [urls, setUrls] = useState(["", "", "", "", "", ""]);  const [documents, setDocuments] = useState([]);
   const [selected, setSelected] = useState({});
-  const [collecting, setCollecting] = useState(false);
   const [notes, setNotes] = useState([]);
   const [error, setError] = useState("");
+
+  const [companyName, setCompanyName] = useState("");
+  const [tickerCode, setTickerCode] = useState("");
+  const [collectingLocal, setCollectingLocal] = useState(false);
+  const [savedDir, setSavedDir] = useState("");
+
+  const [summarizing, setSummarizing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [summaries, setSummaries] = useState([]);
+  const [analysis, setAnalysis] = useState("");
+
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoStage, setAutoStage] = useState("");
 
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
@@ -60,20 +96,22 @@ export default function Home() {
     setUrls(next);
   }
 
-  async function handleCollect() {
-    setCollecting(true);
+  async function handleCollectLocal() {
+    setCollectingLocal(true);
     setError("");
     setNotes([]);
 
     try {
-      const res = await fetch("/api/collect", {
+      const res = await fetch("/api/collect-local", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls }),
+        body: JSON.stringify({ companyName, tickerCode, urls }),
       });
       const data = await res.json();
       if (data.notes) setNotes(data.notes);
-      if (!res.ok) throw new Error(data.error || "取り込みに失敗しました");
+      if (!res.ok) throw new Error(data.error || "収集に失敗しました");
+
+      setSavedDir(data.savedDir || "");
 
       const existingUrls = new Set(documents.map((d) => d.url));
       const fresh = data.documents.filter((d) => !existingUrls.has(d.url));
@@ -87,7 +125,7 @@ export default function Home() {
     } catch (e) {
       setError(e.message);
     } finally {
-      setCollecting(false);
+      setCollectingLocal(false);
     }
   }
 
@@ -111,6 +149,157 @@ export default function Home() {
 
   const activeDocs = documents.filter((d) => selected[d.id]);
   const totalChars = activeDocs.reduce((sum, d) => sum + d.chars, 0);
+
+  async function handleSummarize() {
+    if (!companyName.trim()) {
+      setError("会社名を入力してください");
+      return;
+    }
+    const targets = activeDocs.filter((d) => d.savedPath);
+    if (targets.length === 0) {
+      setError("要約する資料（保存済みPDF）を選択してください");
+      return;
+    }
+    setSummarizing(true);
+    setError("");
+    setNotes([]);
+    try {
+      const res = await fetch("/api/summarize-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName,
+          documents: targets.map((d) => ({ label: d.label, savedPath: d.savedPath })),
+        }),
+      });
+      const data = await res.json();
+      if (data.notes) setNotes(data.notes);
+      if (!res.ok) throw new Error(data.error || "要約に失敗しました");
+      setSummaries(data.summaries || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSummarizing(false);
+    }
+  }
+
+  async function handleAnalyze() {
+    if (!companyName.trim()) {
+      setError("会社名を入力してください");
+      return;
+    }
+    setAnalyzing(true);
+    setError("");
+    try {
+      const res = await fetch("/api/analyze-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName,
+          summaries: summaries.map((s) => ({ label: s.label, text: s.text })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "分析に失敗しました");
+      setAnalysis(data.analysis || "");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function handleAutoRun() {
+    if (!companyName.trim()) {
+      setError("会社名を入力してください");
+      return;
+    }
+    if (!urls.some((u) => (u || "").trim().startsWith("http"))) {
+      setError("IRページのURLを1つ以上入力してください");
+      return;
+    }
+    setError("");
+    setNotes([]);
+    setSummaries([]);
+    setAnalysis("");
+    setAutoRunning(true);
+    try {
+      // 1. 収集
+      setAutoStage("① 収集中...（ブラウザ自動操作。数分かかることがあります）");
+      const cRes = await fetch("/api/collect-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName, tickerCode, urls }),
+      });
+      const cData = await cRes.json();
+      if (cData.notes) setNotes(cData.notes);
+      if (!cRes.ok) throw new Error(cData.error || "収集に失敗しました");
+      setSavedDir(cData.savedDir || "");
+
+      const existingUrls = new Set(documents.map((d) => d.url));
+      const fresh = cData.documents.filter((d) => !existingUrls.has(d.url));
+      setDocuments([...documents, ...fresh]);
+      setSelected((prev) => {
+        const next = { ...prev };
+        fresh.forEach((d) => (next[d.id] = true));
+        return next;
+      });
+
+      // 2. 主要資料を選別して要約
+      const core = pickCoreDocs(cData.documents);
+      if (core.length === 0) {
+        throw new Error(
+          "要約対象（最新の決算短信・決算説明資料・有価証券報告書）が見つかりませんでした。収集は完了しています。"
+        );
+      }
+      const ok = window.confirm(
+        `全自動で ${core.length} 件（${core
+          .map((d) => d.docType)
+          .join("・")}）を要約→分析します。Opusで1件ずつ読むため数分かかり、トークン消費も大きめです。続けますか？`
+      );
+      if (!ok) {
+        setAutoStage("");
+        return;
+      }
+
+      setAutoStage(`② 要約中...（${core.length}件をOpusで精読）`);
+      const sRes = await fetch("/api/summarize-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName,
+          documents: core.map((d) => ({ label: d.label, savedPath: d.savedPath })),
+        }),
+      });
+      const sData = await sRes.json();
+      if (sData.notes) setNotes((prev) => [...prev, ...sData.notes]);
+      if (!sRes.ok) throw new Error(sData.error || "要約に失敗しました");
+      setSummaries(sData.summaries || []);
+      if ((sData.summaries || []).length === 0) {
+        throw new Error("要約を生成できませんでした（対象PDFを読み取れず）。");
+      }
+
+      // 3. 分析
+      setAutoStage("③ 分析中...");
+      const aRes = await fetch("/api/analyze-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName,
+          summaries: sData.summaries.map((s) => ({ label: s.label, text: s.text })),
+        }),
+      });
+      const aData = await aRes.json();
+      if (!aRes.ok) throw new Error(aData.error || "分析に失敗しました");
+      setAnalysis(aData.analysis || "");
+      setAutoStage("✓ 完了");
+    } catch (e) {
+      setError(e.message);
+      setAutoStage("");
+    } finally {
+      setAutoRunning(false);
+    }
+  }
 
   async function handleAsk(text) {
     const q = (text || question).trim();
@@ -155,8 +344,23 @@ export default function Home() {
       <section className="card">
         <h2 className="card-title">1. 資料を取り込む</h2>
         <p className="hint">
-          決算短信・決算説明資料など、PDFが一覧表示されているページのURLを入力してください。
+          IR一覧ページのURL（決算短信・決算説明資料など）を入力してください。証券会社レポートなど個別のPDFは、そのPDFの直リンクURLをそのまま入れてもOKです（_参考資料フォルダに保存されます）。
         </p>
+
+        <input
+          type="text"
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          placeholder="会社名（保存先フォルダ名になります）"
+          className="url-input"
+        />
+        <input
+          type="text"
+          value={tickerCode}
+          onChange={(e) => setTickerCode(e.target.value)}
+          placeholder="証券コード（任意）"
+          className="url-input"
+        />
 
         {urls.map((url, i) => (
           <input
@@ -169,13 +373,31 @@ export default function Home() {
           />
         ))}
 
-        <button onClick={handleCollect} disabled={collecting} className="btn">
-          {collecting ? "取り込み中..." : "取り込む"}
+        <button
+          onClick={handleAutoRun}
+          disabled={autoRunning || collectingLocal}
+          className="btn btn-primary"
+        >
+          {autoRunning ? "全自動 実行中..." : "全自動（収集 → 要約 → 分析）"}
         </button>
+        <p className="hint">
+          URLから、収集・保存・要約・分析までを一気に実行します。要約は「最新の決算短信・決算説明資料・有価証券報告書」を自動選別（Opusで精読）。全資料を要約したいときは下の個別ボタンを使ってください。
+        </p>
 
-        {collecting && (
-          <p className="hint">PDFの数によっては1〜2分かかります。</p>
-        )}
+        {autoStage && <p className="hint">進捗: {autoStage}</p>}
+
+        <button
+          onClick={handleCollectLocal}
+          disabled={collectingLocal || autoRunning}
+          className="btn"
+        >
+          {collectingLocal ? "収集中..." : "取り込むだけ（PDFを保存）"}
+        </button>
+        <p className="hint">
+          ブラウザを自動操作して年度セレクタも辿り、PDFを ~/Documents/IR資料/ に保存します。数分かかることがあります。
+        </p>
+
+        {savedDir && <p className="hint">保存先: {savedDir}</p>}
 
         {notes.length > 0 && (
           <ul className="notes">
@@ -215,6 +437,7 @@ export default function Home() {
                   </label>
                   <span className="doc-meta">
                     {doc.pages}頁 / {doc.chars.toLocaleString()}字
+                    {doc.savedPath ? ` / 保存済み` : ""}
                   </span>
                   <a href={doc.url} target="_blank" rel="noreferrer" className="doc-link">
                     原文
@@ -233,7 +456,47 @@ export default function Home() {
       </section>
 
       <section className="card">
-        <h2 className="card-title">3. 質問する</h2>
+        <h2 className="card-title">3. 要約・分析（一次情報を正確に）</h2>
+        <p className="hint">
+          選択中の保存済みPDFをOpusが直接読み、原文引用・出典ページ付きで要約します。数字が命の用途向け。トークン消費は大きめなので、必要な資料だけ選んでください。有価証券報告書など100頁超はMD&A・経理などの必要セクションを自動抜粋します。
+        </p>
+
+        <div className="presets">
+          <button onClick={handleSummarize} disabled={summarizing} className="btn">
+            {summarizing ? "要約を作成中..." : "選択資料の要約を作成"}
+          </button>
+          <button
+            onClick={handleAnalyze}
+            disabled={analyzing || summaries.length === 0}
+            className="btn"
+          >
+            {analyzing ? "分析中..." : "要約から分析"}
+          </button>
+        </div>
+
+        {summaries.length > 0 && (
+          <div className="chat">
+            {summaries.map((s, i) => (
+              <div key={i} className="msg-ai">
+                <strong>{s.label}</strong>
+                <pre>{s.text}</pre>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {analysis && (
+          <div className="chat">
+            <div className="msg-ai">
+              <strong>分析レポート</strong>
+              <pre>{analysis}</pre>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">4. 質問する</h2>
 
         {messages.length === 0 && (
           <div className="presets">
@@ -267,6 +530,8 @@ export default function Home() {
             送信
           </button>
         </div>
+
+        {error && <div className="error">{error}</div>}
       </section>
     </main>
   );

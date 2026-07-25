@@ -28,9 +28,13 @@ export async function POST(request) {
   try {
     const { documents, messages } = await request.json();
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey || !apiKey.startsWith("sk-ant")) {
       return Response.json(
-        { error: "APIキーが設定されていません" },
+        {
+          error:
+            "APIキーが正しく設定されていません。.env.local に ANTHROPIC_API_KEY=sk-ant... の形で設定し、サーバーを再起動してください。",
+        },
         { status: 500 }
       );
     }
