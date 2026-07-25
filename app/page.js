@@ -528,22 +528,24 @@ export default function Home() {
           選択中の保存済みPDFをOpusが直接読み、原文引用・出典ページ付きで要約します。数字が命の用途向け。トークン消費は大きめなので、必要な資料だけ選んでください。有価証券報告書など100頁超はMD&A・経理などの必要セクションを自動抜粋します。
         </p>
 
-        <details style={{ marginBottom: 10 }}>
-          <summary style={{ cursor: "pointer", fontSize: 13, color: "#4a5568" }}>
+        <div style={{ marginBottom: 10 }}>
+          <label
+            style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#2d3748", marginBottom: 4 }}
+          >
             分析プロファイル（あなたの観点・手法。分析にだけ反映。要約は中立のまま）
-          </summary>
+          </label>
           <textarea
             value={analysisProfile}
             onChange={(e) => setAnalysisProfile(e.target.value)}
             rows={7}
             className="ask-input"
-            style={{ width: "100%", marginTop: 6 }}
+            style={{ width: "100%" }}
             placeholder="例）割安成長株を長期目線で。受注残高と営業CFを最重視。ですます調で結論から。"
           />
           <p className="hint">
-            一度書けば保存され、以後の「分析」に自動で反映されます（原文引用・事実と所見の分離などの厳格ルールは常に維持）。
+            一度書けば保存され、以後の「分析」に自動で反映されます（原文引用・事実と所見の分離などの厳格ルールは常に維持）。業種に合わせて書き換えてください。
           </p>
-        </details>
+        </div>
 
         <div className="presets">
           <button onClick={handleSummarize} disabled={summarizing} className="btn">
