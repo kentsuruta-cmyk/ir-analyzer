@@ -3,6 +3,15 @@
 import { useState, useEffect, useRef } from "react";
 
 const STORAGE_KEY = "ir-analyzer-documents";
+const PROFILE_KEY = "ir-analyzer-profile";
+
+const DEFAULT_PROFILE = `あなたは経験豊富な株式アナリストです。ですます調で、結論から述べてください。
+特に次の観点を重視します:
+- 売上・利益の推移と、その変動要因（一時要因か実力か）
+- 営業キャッシュフローと利益の整合性
+- セグメント別の採算と成長ドライバー
+- 会社が示す通期見通しと中期経営計画の進捗
+- 財務の健全性と主なリスク`;
 
 const PRESET_QUESTIONS = [
   "業績のサマリーを教えて",
@@ -53,6 +62,7 @@ export default function Home() {
 
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoStage, setAutoStage] = useState("");
+  const [analysisProfile, setAnalysisProfile] = useState(DEFAULT_PROFILE);
 
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
@@ -72,9 +82,19 @@ export default function Home() {
         parsed.forEach((d) => (init[d.id] = true));
         setSelected(init);
       }
+      const savedProfile = localStorage.getItem(PROFILE_KEY);
+      if (savedProfile != null) setAnalysisProfile(savedProfile);
     } catch {}
     setLoaded(true);
   }, []);
+
+  // 分析プロファイルの保存
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(PROFILE_KEY, analysisProfile);
+    } catch {}
+  }, [analysisProfile, loaded]);
 
   // 変更のたびにブラウザに保存
   useEffect(() => {
@@ -197,6 +217,7 @@ export default function Home() {
         body: JSON.stringify({
           companyName,
           summaries: summaries.map((s) => ({ label: s.label, text: s.text })),
+          profile: analysisProfile,
         }),
       });
       const data = await res.json();
@@ -287,6 +308,7 @@ export default function Home() {
         body: JSON.stringify({
           companyName,
           summaries: sData.summaries.map((s) => ({ label: s.label, text: s.text })),
+          profile: analysisProfile,
         }),
       });
       const aData = await aRes.json();
@@ -460,6 +482,23 @@ export default function Home() {
         <p className="hint">
           選択中の保存済みPDFをOpusが直接読み、原文引用・出典ページ付きで要約します。数字が命の用途向け。トークン消費は大きめなので、必要な資料だけ選んでください。有価証券報告書など100頁超はMD&A・経理などの必要セクションを自動抜粋します。
         </p>
+
+        <details style={{ marginBottom: 10 }}>
+          <summary style={{ cursor: "pointer", fontSize: 13, color: "#4a5568" }}>
+            分析プロファイル（あなたの観点・手法。分析にだけ反映。要約は中立のまま）
+          </summary>
+          <textarea
+            value={analysisProfile}
+            onChange={(e) => setAnalysisProfile(e.target.value)}
+            rows={7}
+            className="ask-input"
+            style={{ width: "100%", marginTop: 6 }}
+            placeholder="例）割安成長株を長期目線で。受注残高と営業CFを最重視。ですます調で結論から。"
+          />
+          <p className="hint">
+            一度書けば保存され、以後の「分析」に自動で反映されます（原文引用・事実と所見の分離などの厳格ルールは常に維持）。
+          </p>
+        </details>
 
         <div className="presets">
           <button onClick={handleSummarize} disabled={summarizing} className="btn">

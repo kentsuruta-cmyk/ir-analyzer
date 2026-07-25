@@ -57,7 +57,7 @@ export async function POST(request) {
       );
     }
 
-    const { companyName, summaries, question } = await request.json();
+    const { companyName, summaries, question, profile } = await request.json();
     const company = (companyName || "").trim();
     if (!company) {
       return Response.json({ error: "会社名がありません" }, { status: 400 });
@@ -88,7 +88,13 @@ export async function POST(request) {
       ? `次の観点を特に重視して分析してください: ${question.trim()}`
       : `${company} の事業内容・業績・将来の成長性見通しを分析してください。`;
 
-    const system = `${RULES}\n\n【参照可能な要約は以下がすべてです】${block}`;
+    // ユーザーの分析プロファイル（観点・手法・口調）を反映。ただし上のRULES（引用強制・
+    // 事実と所見の分離・要約に無いことは述べない）は厳守で、プロファイルはそれを上書きしない。
+    const profileBlock = (profile || "").trim()
+      ? `\n\n【分析者の視点・重視する観点（この観点・スタイルで分析してください。ただし上の絶対ルールは厳守）】\n${profile.trim()}`
+      : "";
+
+    const system = `${RULES}${profileBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
     const anthropic = new Anthropic({ apiKey });
     const response = await anthropic.messages.create({
       model: ANALYSIS_MODEL,
