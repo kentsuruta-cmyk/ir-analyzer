@@ -7,13 +7,17 @@ const PROFILE_KEY = "ir-analyzer-profile";
 const COMPANY_KEY = "ir-analyzer-company";
 const TICKER_KEY = "ir-analyzer-ticker";
 
-const DEFAULT_PROFILE = `あなたは経験豊富な株式アナリストです。ですます調で、結論から述べてください。
-特に次の観点を重視します:
-- 売上・利益の推移と、その変動要因（一時要因か実力か）
-- 営業キャッシュフローと利益の整合性
-- セグメント別の採算と成長ドライバー
-- 会社が示す通期見通しと中期経営計画の進捗
-- 財務の健全性と主なリスク`;
+const DEFAULT_PROFILE = `あなたはゴールドマン・サックスのトップアナリストです。ですます調で、結論から述べ、主張には必ず数値の根拠と理由を付けます。
+
+まずこの会社の業種を見極め、その業種で重視される観点・指標に沿って分析してください。
+・証券/投資銀行：収益構成（ウェルス/運用/ホールセール）、ROE、費用対収益比率、預り資産残高、自己資本規制比率。トレーディング頼みの一過性増益は割り引く。
+・銀行：NIM、不良債権比率、自己資本比率（BIS/CET1）、貸出の伸び、与信費用。預金は負債だが低コスト調達なら強み。
+・不動産：稼働率、NOI、含み益、有利子負債とLTV、開発パイプライン。
+・製造業：売上・利益の推移と変動要因、営業CFと利益の整合性、セグメント採算、受注・在庫、設備投資。
+・SaaS/ソフト：ARR・売上成長率、解約率、粗利率、顧客獲得効率、営業CF。
+・上記以外：その業種で一般に重視される指標を自分で選び、理由を添えて分析する。
+
+事実（要約からの引用）と、あなたの解釈【所見】を明確に分け、良し悪しの判断には必ず数値の根拠を添えてください。`;
 
 const PRESET_QUESTIONS = [
   "業績のサマリーを教えて",
@@ -252,8 +256,8 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // summaries を送らないことで、その会社の保存済み要約すべて（_要約/*.md）を対象に分析する
           companyName: company,
-          summaries: summaries.map((s) => ({ label: s.label, text: s.text })),
           profile: analysisProfile,
         }),
       });
@@ -543,7 +547,14 @@ export default function Home() {
             placeholder="例）割安成長株を長期目線で。受注残高と営業CFを最重視。ですます調で結論から。"
           />
           <p className="hint">
-            一度書けば保存され、以後の「分析」に自動で反映されます（原文引用・事実と所見の分離などの厳格ルールは常に維持）。業種に合わせて書き換えてください。
+            一度書けば保存され、以後の「分析」に自動で反映されます（原文引用・事実と所見の分離などの厳格ルールは常に維持）。業種は自動判定するので入れ替え不要です。
+            <button
+              onClick={() => setAnalysisProfile(DEFAULT_PROFILE)}
+              className="link-btn"
+              style={{ marginLeft: 8 }}
+            >
+              デフォルトに戻す
+            </button>
           </p>
         </div>
 
@@ -551,12 +562,8 @@ export default function Home() {
           <button onClick={handleSummarize} disabled={summarizing} className="btn">
             {summarizing ? "要約を作成中..." : "選択資料の要約を作成"}
           </button>
-          <button
-            onClick={handleAnalyze}
-            disabled={analyzing || summaries.length === 0}
-            className="btn"
-          >
-            {analyzing ? "分析中..." : "要約から分析"}
+          <button onClick={handleAnalyze} disabled={analyzing} className="btn">
+            {analyzing ? "分析中..." : "要約から分析（保存済み要約すべて）"}
           </button>
         </div>
 

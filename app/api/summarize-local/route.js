@@ -65,6 +65,17 @@ export async function POST(request) {
         continue;
       }
 
+      // 既に要約済み（_要約/*.md が存在）ならOpusを呼ばずに再利用（再課金なし・分割実行を可能に）
+      const mdPathEarly = path.join(outDir, path.basename(pdfPath).replace(/\.pdf$/i, "") + ".md");
+      if (fs.existsSync(mdPathEarly)) {
+        try {
+          const existing = fs.readFileSync(mdPathEarly, "utf8");
+          summaries.push({ label, savedPath: pdfPath, mdPath: mdPathEarly, text: existing });
+          notes.push(`${label} … 既に要約済み（スキップ）`);
+          continue;
+        } catch {}
+      }
+
       try {
         let buffer = fs.readFileSync(pdfPath);
         let note = "";
