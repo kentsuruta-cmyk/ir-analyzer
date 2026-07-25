@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 
 const STORAGE_KEY = "ir-analyzer-documents";
 const PROFILE_KEY = "ir-analyzer-profile";
+const COMPANY_KEY = "ir-analyzer-company";
+const TICKER_KEY = "ir-analyzer-ticker";
 
 const DEFAULT_PROFILE = `あなたは経験豊富な株式アナリストです。ですます調で、結論から述べてください。
 特に次の観点を重視します:
@@ -19,6 +21,17 @@ const PRESET_QUESTIONS = [
   "今期の会社見通しと進捗は？",
   "リスク・懸念点を挙げて",
 ];
+
+// 保存済みPDFのパス（~/Documents/IR資料/{会社名}/...）から会社名を取り出す。
+function deriveCompanyName(docs) {
+  for (const d of docs) {
+    if (d.savedPath) {
+      const after = d.savedPath.split("/IR資料/")[1];
+      if (after) return after.split("/")[0];
+    }
+  }
+  return "";
+}
 
 // 全自動で要約する主要資料を選ぶ。種別ごとに最新年度（同年なら通期優先）を1件ずつ。
 function pickCoreDocs(docs) {
@@ -84,17 +97,23 @@ export default function Home() {
       }
       const savedProfile = localStorage.getItem(PROFILE_KEY);
       if (savedProfile != null) setAnalysisProfile(savedProfile);
+      const savedCompany = localStorage.getItem(COMPANY_KEY);
+      if (savedCompany) setCompanyName(savedCompany);
+      const savedTicker = localStorage.getItem(TICKER_KEY);
+      if (savedTicker) setTickerCode(savedTicker);
     } catch {}
     setLoaded(true);
   }, []);
 
-  // 分析プロファイルの保存
+  // 分析プロファイル・会社名・証券コードの保存
   useEffect(() => {
     if (!loaded) return;
     try {
       localStorage.setItem(PROFILE_KEY, analysisProfile);
+      localStorage.setItem(COMPANY_KEY, companyName);
+      localStorage.setItem(TICKER_KEY, tickerCode);
     } catch {}
-  }, [analysisProfile, loaded]);
+  }, [analysisProfile, companyName, tickerCode, loaded]);
 
   // 変更のたびにブラウザに保存
   useEffect(() => {
@@ -171,13 +190,23 @@ export default function Home() {
   const totalChars = activeDocs.reduce((sum, d) => sum + d.chars, 0);
 
   async function handleSummarize() {
-    if (!companyName.trim()) {
-      setError("会社名を入力してください");
-      return;
-    }
     const targets = activeDocs.filter((d) => d.savedPath);
     if (targets.length === 0) {
       setError("要約する資料（保存済みPDF）を選択してください");
+      return;
+    }
+    const company = companyName.trim() || deriveCompanyName(targets);
+    if (!company) {
+      setError("会社名を入力してください");
+      return;
+    }
+    if (!companyName.trim()) setCompanyName(company);
+    if (
+      targets.length > 5 &&
+      !window.confirm(
+        `${targets.length}件を要約します。Opusで1件ずつ読むため時間（数分〜十数分）とトークン消費が大きめです。続けますか？（必要な資料だけ選ぶことを推奨）`
+      )
+    ) {
       return;
     }
     setSummarizing(true);
@@ -188,7 +217,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          companyName,
+          companyName: company,
           documents: targets.map((d) => ({ label: d.label, savedPath: d.savedPath })),
         }),
       });
@@ -204,7 +233,9 @@ export default function Home() {
   }
 
   async function handleAnalyze() {
-    if (!companyName.trim()) {
+    const company =
+      companyName.trim() || deriveCompanyName(activeDocs) || deriveCompanyName(documents);
+    if (!company) {
       setError("会社名を入力してください");
       return;
     }
@@ -215,7 +246,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          companyName,
+          companyName: company,
           summaries: summaries.map((s) => ({ label: s.label, text: s.text })),
           profile: analysisProfile,
         }),
@@ -512,6 +543,13 @@ export default function Home() {
             {analyzing ? "分析中..." : "要約から分析"}
           </button>
         </div>
+
+        {error && <div className="error">{error}</div>}
+        {(summarizing || analyzing) && (
+          <p className="hint">
+            {summarizing ? "要約中..." : "分析中..."}（Opusで精読するため時間がかかります）
+          </p>
+        )}
 
         {summaries.length > 0 && (
           <div className="chat">
