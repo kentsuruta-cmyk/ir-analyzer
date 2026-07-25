@@ -67,26 +67,44 @@ export async function POST(request) {
 
       try {
         let buffer = fs.readFileSync(pdfPath);
-        const pageCount = await getPageCount(buffer);
         let note = "";
 
-        // 上限超なら有報セクション抜粋を試みる
-        if (!withinLimits(buffer, pageCount)) {
-          const { trimmed, reason, keptPages } = await trimToRelevantSections(buffer);
-          if (trimmed) {
-            buffer = trimmed;
-            note = `（${pageCount}頁→必要セクション${keptPages}頁に抜粋）`;
-          } else if (reason === "image") {
-            notes.push(
-              `${label} … ${pageCount}頁の画像PDFで${MAX_PAGES}頁を超えるため要約不可。NotebookLM推奨`
-            );
-            continue;
-          } else {
-            notes.push(
-              `${label} … ${pageCount}頁で${MAX_PAGES}頁を超え、章を特定できず要約不可。NotebookLM推奨`
-            );
-            continue;
+        // ページ数チェックはpdf-libで行うが、解析できないPDF（野村等の特殊構造）もある。
+        // 失敗してもページ数不明として続行し、そのままClaudeに渡す（Claudeの方が頑健）。
+        let pageCount = null;
+        try {
+          pageCount = await getPageCount(buffer);
+        } catch {
+          pageCount = null;
+        }
+
+        // ページ数が分かり、かつ上限超なら有報セクション抜粋を試みる
+        if (pageCount != null && !withinLimits(buffer, pageCount)) {
+          try {
+            const { trimmed, reason, keptPages } = await trimToRelevantSections(buffer);
+            if (trimmed) {
+              buffer = trimmed;
+              note = `（${pageCount}頁→必要セクション${keptPages}頁に抜粋）`;
+            } else if (reason === "image") {
+              notes.push(
+                `${label} … ${pageCount}頁の画像PDFで${MAX_PAGES}頁を超えるため要約不可。NotebookLM推奨`
+              );
+              continue;
+            } else {
+              notes.push(
+                `${label} … ${pageCount}頁で${MAX_PAGES}頁を超え、章を特定できず要約不可。NotebookLM推奨`
+              );
+              continue;
+            }
+          } catch {
+            // 抜粋にも失敗した場合はそのままClaudeに渡す（上限超なら後段でエラーになる）
           }
+        }
+
+        // サイズが明確に上限超なら送らない（Claudeの32MB制限対策）
+        if (buffer.length > 30 * 1024 * 1024) {
+          notes.push(`${label} … ファイルが大きすぎるため要約不可。NotebookLM推奨`);
+          continue;
         }
 
         const summary = await summarizePdf({
