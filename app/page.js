@@ -274,6 +274,11 @@ export default function Home() {
       setError("会社名を入力してください");
       return;
     }
+    const targets = activeDocs.filter((d) => d.savedPath);
+    if (targets.length === 0) {
+      setError("分析する資料を選択してください（チェックした資料の要約だけを分析します）");
+      return;
+    }
     setAnalyzing(true);
     setError("");
     try {
@@ -281,8 +286,9 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // summaries を送らないことで、その会社の保存済み要約すべて（_要約/*.md）を対象に分析する
+          // 選択中の資料の要約だけを分析対象にする（フォルダ内の古い要約の混入を防ぐ）
           companyName: company,
+          documents: targets.map((d) => ({ label: d.label, savedPath: d.savedPath })),
           profile: analysisProfile,
         }),
       });
@@ -591,7 +597,7 @@ export default function Home() {
             {summarizing ? "要約を作成中..." : "選択資料の要約を作成"}
           </button>
           <button onClick={handleAnalyze} disabled={analyzing} className="btn">
-            {analyzing ? "分析中..." : "要約から分析（保存済み要約すべて）"}
+            {analyzing ? "分析中..." : "選択資料の要約から分析"}
           </button>
         </div>
 

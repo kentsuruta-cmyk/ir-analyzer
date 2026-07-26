@@ -57,16 +57,37 @@ export async function POST(request) {
       );
     }
 
-    const { companyName, summaries, question, profile } = await request.json();
+    const { companyName, summaries, documents, question, profile } = await request.json();
     const company = (companyName || "").trim();
     if (!company) {
       return Response.json({ error: "会社名がありません" }, { status: 400 });
     }
 
-    // クライアントから要約が渡されればそれを、無ければディスクの_要約から読む
-    let items = Array.isArray(summaries) && summaries.length > 0
-      ? summaries.filter((s) => s && s.text)
-      : readSummariesFromDisk(company);
+    // 分析対象の要約を決める（優先順）:
+    // 1. documents（選択中の資料）が来たら、その資料の要約だけを使う（古い要約の混入を防ぐ）
+    // 2. summaries が直接来たらそれ
+    // 3. どちらも無ければフォルダ内の全要約（後方互換）
+    let items = [];
+    if (Array.isArray(documents) && documents.length > 0) {
+      const dir = path.join(getCompanyDir(company), "_要約");
+      for (const d of documents) {
+        if (!d.savedPath) continue;
+        const md = path.join(dir, path.basename(d.savedPath).replace(/\.pdf$/i, "") + ".md");
+        if (fs.existsSync(md)) {
+          items.push({ label: d.label || path.basename(md), text: fs.readFileSync(md, "utf8") });
+        }
+      }
+      if (items.length === 0) {
+        return Response.json(
+          { error: "選択した資料の要約が見つかりません。先に「選択資料の要約を作成」してください。" },
+          { status: 400 }
+        );
+      }
+    } else if (Array.isArray(summaries) && summaries.length > 0) {
+      items = summaries.filter((s) => s && s.text);
+    } else {
+      items = readSummariesFromDisk(company);
+    }
 
     if (items.length === 0) {
       return Response.json(
