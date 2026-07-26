@@ -81,6 +81,7 @@ export default function Home() {
   const [autoStage, setAutoStage] = useState("");
   const [analysisProfile, setAnalysisProfile] = useState(DEFAULT_PROFILE);
   const [relabeling, setRelabeling] = useState(false);
+  const [useExternal, setUseExternal] = useState(false);
 
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
@@ -301,6 +302,7 @@ export default function Home() {
           companyName: company,
           documents: targets.map((d) => ({ label: d.label, savedPath: d.savedPath })),
           profile: analysisProfile,
+          external: useExternal,
         }),
       });
       const data = await res.json();
@@ -647,6 +649,14 @@ export default function Home() {
           <button onClick={handleAnalyze} disabled={analyzing} className="btn">
             {analyzing ? "分析中..." : "選択資料の要約から分析"}
           </button>
+          <label className="hint" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={useExternal}
+              onChange={(e) => setUseExternal(e.target.checked)}
+            />
+            外部情報も参照（競合・業界をWeb検索。出典付きで別セクションに。少し遅く・検索コスト）
+          </label>
         </div>
 
         {error && <div className="error">{error}</div>}

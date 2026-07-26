@@ -58,7 +58,7 @@ export async function POST(request) {
       );
     }
 
-    const { companyName, summaries, documents, question, profile } = await request.json();
+    const { companyName, summaries, documents, question, profile, external } = await request.json();
     const company = (companyName || "").trim();
     if (!company) {
       return Response.json({ error: "会社名がありません" }, { status: 400 });
@@ -116,14 +116,38 @@ export async function POST(request) {
       ? `\n\n【分析者の視点・重視する観点（この観点・スタイルで分析してください。ただし上の絶対ルールは厳守）】\n${profile.trim()}`
       : "";
 
-    const system = `${RULES}${profileBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
+    // 外部情報（競合・業界）を持ち込む場合だけ、Web検索を許可し、外部由来は
+    // 出典付きの専用セクションに隔離する。要約ベースの判断（上のRULES）とは混ぜない。
+    const externalBlock = external
+      ? `\n\n【外部情報の扱い（この分析ではWeb検索が使えます）】
+- 競合・業界の状況など、要約に無い情報はWeb検索で調べてよい。ただし必ず「## 競合・業界の状況（外部情報）」という専用セクションにまとめ、それ以外のセクション（最新の実績・シナリオ等）には外部情報を混ぜない。
+- 外部情報の各記述には、出典（媒体名・可能ならURL）を必ず添える。裏取りできない噂は書かない。
+- 「## 競合・業界の状況（外部情報）」を、着眼点の前に追加すること。要約由来の事実と外部由来の情報が、読み手に明確に区別できるようにする。`
+      : "";
+
+    const system = `${RULES}${profileBlock}${externalBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
     const anthropic = new Anthropic({ apiKey });
-    const response = await anthropic.messages.create({
-      model: ANALYSIS_MODEL,
-      max_tokens: 6000,
-      system,
-      messages: [{ role: "user", content: userText }],
-    });
+
+    // 外部情報ON時はWeb検索ツール（サーバー側実行・出典付き）を渡す。
+    const tools = external
+      ? [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }]
+      : undefined;
+
+    // Web検索はサーバー側でループするため、上限に達すると stop_reason=pause_turn で返る。
+    // その場合は会話を継ぎ足して再開する。
+    const messages = [{ role: "user", content: userText }];
+    let response;
+    for (let i = 0; i < 6; i++) {
+      response = await anthropic.messages.create({
+        model: ANALYSIS_MODEL,
+        max_tokens: 6000,
+        system,
+        messages,
+        ...(tools ? { tools } : {}),
+      });
+      if (response.stop_reason !== "pause_turn") break;
+      messages.push({ role: "assistant", content: response.content });
+    }
 
     const analysis = response.content
       .filter((b) => b.type === "text")
