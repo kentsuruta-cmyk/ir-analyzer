@@ -80,6 +80,7 @@ export default function Home() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoStage, setAutoStage] = useState("");
   const [analysisProfile, setAnalysisProfile] = useState(DEFAULT_PROFILE);
+  const [relabeling, setRelabeling] = useState(false);
 
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
@@ -180,6 +181,30 @@ export default function Home() {
     const next = {};
     documents.forEach((d) => (next[d.id] = value));
     setSelected(next);
+  }
+
+  async function handleRelabel() {
+    const targets = documents.filter((d) => d.text);
+    if (targets.length === 0) return;
+    setRelabeling(true);
+    setError("");
+    try {
+      const res = await fetch("/api/relabel-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documents: targets.map((d) => ({ id: d.id, text: d.text })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "資料名の整理に失敗しました");
+      const labels = data.labels || {};
+      setDocuments((docs) =>
+        docs.map((d) => (labels[d.id] ? { ...d, label: labels[d.id] } : d))
+      );
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setRelabeling(false);
+    }
   }
 
   function removeDoc(id) {
@@ -478,6 +503,9 @@ export default function Home() {
           <h2 className="card-title">2. 資料棚（{documents.length}件）</h2>
           {documents.length > 0 && (
             <span>
+              <button onClick={handleRelabel} disabled={relabeling} className="link-btn">
+                {relabeling ? "整理中..." : "資料名を整える"}
+              </button>
               <button onClick={() => setAllSelected(true)} className="link-btn">
                 全選択
               </button>
