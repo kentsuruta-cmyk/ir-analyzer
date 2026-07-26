@@ -94,15 +94,19 @@ export async function POST(request) {
 
     // ラベル形式: 「いつ（決算期 or 日付）＋四半期があれば＋種別」。
     // 会社名は資料棚が1社単位なので省略。「いつの資料か」を先頭に。
+    // ラベルに加え、種別・決算期・四半期の構造化フィールドも返す（全自動の資料選別で使う）。
     const labels = {};
+    const fields = {};
     for (const r of results) {
-      const when = (r.fiscalPeriod || "").trim() || (r.date || "").trim();
+      const fiscalYear = (r.fiscalPeriod || "").trim();
+      const when = fiscalYear || (r.date || "").trim();
       const q = r.quarter && r.quarter !== "不明" ? r.quarter.trim() : "";
       const parts = [when, q, (r.docType || "").trim()].filter(Boolean);
       if (parts.length) labels[r.id] = parts.join(" ");
+      fields[r.id] = { docType: (r.docType || "").trim(), fiscalYear, quarter: q };
     }
 
-    return Response.json({ labels });
+    return Response.json({ labels, fields });
   } catch (e) {
     return Response.json({ error: `エラー: ${e.message}` }, { status: 500 });
   }

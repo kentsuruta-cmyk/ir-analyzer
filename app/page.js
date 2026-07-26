@@ -197,8 +197,19 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "資料名の整理に失敗しました");
       const labels = data.labels || {};
+      const fields = data.fields || {};
       setDocuments((docs) =>
-        docs.map((d) => (labels[d.id] ? { ...d, label: labels[d.id] } : d))
+        docs.map((d) => {
+          if (!labels[d.id] && !fields[d.id]) return d;
+          const f = fields[d.id] || {};
+          return {
+            ...d,
+            label: labels[d.id] || d.label,
+            docType: f.docType || d.docType,
+            fiscalYear: f.fiscalYear || d.fiscalYear,
+            quarter: f.quarter || d.quarter,
+          };
+        })
       );
     } catch (e) {
       setError(e.message);
@@ -331,18 +342,55 @@ export default function Home() {
 
       const existingUrls = new Set(documents.map((d) => d.url));
       const fresh = cData.documents.filter((d) => !existingUrls.has(d.url));
-      setDocuments([...documents, ...fresh]);
+
+      // 2. 資料名を中身から判定（リネーム＋種別・決算期の付与）。
+      //    ファイル名が汎用（例: 野村の「PDF」）で収集時の分類が効かない場合でも、
+      //    中身を読んで種別・時期を確定し、最新の主要資料を選別できるようにする。
+      setAutoStage("② 資料名を判定中...（中身を読んで整理）");
+      let enriched = cData.documents;
+      const relTargets = cData.documents.filter((d) => d.text);
+      if (relTargets.length) {
+        try {
+          const rRes = await fetch("/api/relabel-local", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              documents: relTargets.map((d) => ({ id: d.id, text: d.text })),
+            }),
+          });
+          const rData = await rRes.json();
+          if (rRes.ok) {
+            const labels = rData.labels || {};
+            const fields = rData.fields || {};
+            enriched = cData.documents.map((d) => {
+              const f = fields[d.id] || {};
+              return {
+                ...d,
+                label: labels[d.id] || d.label,
+                docType: f.docType || d.docType,
+                fiscalYear: f.fiscalYear || d.fiscalYear,
+                quarter: f.quarter || d.quarter,
+              };
+            });
+          }
+        } catch {
+          // リネームに失敗しても収集済みの分類でそのまま続行
+        }
+      }
+
+      const freshEnriched = enriched.filter((d) => !existingUrls.has(d.url));
+      setDocuments([...documents, ...freshEnriched]);
       setSelected((prev) => {
         const next = { ...prev };
-        fresh.forEach((d) => (next[d.id] = true));
+        freshEnriched.forEach((d) => (next[d.id] = true));
         return next;
       });
 
-      // 2. 主要資料を選別して要約
-      const core = pickCoreDocs(cData.documents);
+      // 3. 主要資料を選別して要約
+      const core = pickCoreDocs(enriched);
       if (core.length === 0) {
         throw new Error(
-          "要約対象（最新の決算短信・決算説明資料・有価証券報告書）が見つかりませんでした。収集は完了しています。"
+          "要約対象（最新の決算短信・決算説明資料・有価証券報告書）が見つかりませんでした。収集は完了しています。資料棚から手動で選んで「選択資料の要約を作成」してください。"
         );
       }
       const ok = window.confirm(
@@ -355,7 +403,7 @@ export default function Home() {
         return;
       }
 
-      setAutoStage(`② 要約中...（${core.length}件をOpusで精読）`);
+      setAutoStage(`③ 要約中...（${core.length}件をOpusで精読）`);
       const sRes = await fetch("/api/summarize-local", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -373,7 +421,7 @@ export default function Home() {
       }
 
       // 3. 分析
-      setAutoStage("③ 分析中...");
+      setAutoStage("④ 分析中...");
       const aRes = await fetch("/api/analyze-local", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
