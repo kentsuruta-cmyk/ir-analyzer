@@ -58,8 +58,15 @@ export async function POST(request) {
                   type: "object",
                   properties: {
                     id: { type: "string" },
-                    company: { type: "string", description: "会社名。例: 野村ホールディングス。不明なら空文字" },
-                    fiscalPeriod: { type: "string", description: "決算期。例: 2026年3月期。不明なら空文字" },
+                    fiscalPeriod: {
+                      type: "string",
+                      description: "決算期。例: 2026年3月期。決算に紐づかない資料（適時開示等）は空文字",
+                    },
+                    date: {
+                      type: "string",
+                      description:
+                        "決算期が無い資料の日付。例: 2026年4月24日。決算期がある場合は空文字でよい",
+                    },
                     quarter: {
                       type: "string",
                       description: "第1四半期 / 第2四半期 / 第3四半期 / 通期 / 中間期 / 不明 のいずれか",
@@ -67,10 +74,10 @@ export async function POST(request) {
                     docType: {
                       type: "string",
                       description:
-                        "決算短信 / 決算説明資料 / 有価証券報告書 / 四半期報告書 / 決算補足資料 / 質疑応答 / その他 のいずれか",
+                        "決算短信 / 決算説明資料 / 有価証券報告書 / 四半期報告書 / 決算補足資料 / 質疑応答 / 適時開示 / その他 のいずれか",
                     },
                   },
-                  required: ["id", "company", "fiscalPeriod", "quarter", "docType"],
+                  required: ["id", "fiscalPeriod", "date", "quarter", "docType"],
                 },
               },
             },
@@ -85,11 +92,13 @@ export async function POST(request) {
     const toolUse = res.content.find((b) => b.type === "tool_use");
     const results = toolUse?.input?.results || [];
 
-    // ラベル形式: 「決算期 四半期 会社名 種別」（時期を頭に、次に会社名）
+    // ラベル形式: 「いつ（決算期 or 日付）＋四半期があれば＋種別」。
+    // 会社名は資料棚が1社単位なので省略。「いつの資料か」を先頭に。
     const labels = {};
     for (const r of results) {
-      const q = r.quarter && r.quarter !== "不明" ? r.quarter : "";
-      const parts = [r.fiscalPeriod, q, r.company, r.docType].map((s) => (s || "").trim()).filter(Boolean);
+      const when = (r.fiscalPeriod || "").trim() || (r.date || "").trim();
+      const q = r.quarter && r.quarter !== "不明" ? r.quarter.trim() : "";
+      const parts = [when, q, (r.docType || "").trim()].filter(Boolean);
       if (parts.length) labels[r.id] = parts.join(" ");
     }
 
