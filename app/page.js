@@ -81,7 +81,7 @@ export default function Home() {
   const [autoStage, setAutoStage] = useState("");
   const [analysisProfile, setAnalysisProfile] = useState(DEFAULT_PROFILE);
   const [relabeling, setRelabeling] = useState(false);
-  const [useExternal, setUseExternal] = useState(false);
+  const [useExternal, setUseExternal] = useState(true);
 
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
@@ -655,7 +655,7 @@ export default function Home() {
               checked={useExternal}
               onChange={(e) => setUseExternal(e.target.checked)}
             />
-            外部情報も参照（競合・業界をWeb検索。出典付きで別セクションに。少し遅く・検索コスト）
+            業界リサーチも入れる（競合・業界をWeb検索し、出典付きで分析に反映。要約は一次情報のまま。少し遅く・検索コスト）
           </label>
         </div>
 
