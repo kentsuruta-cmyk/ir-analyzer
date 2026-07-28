@@ -61,6 +61,103 @@ function pickCoreDocs(docs) {
   return core.filter((d) => (seen.has(d.url) ? false : (seen.add(d.url), true)));
 }
 
+// 見出しの内容からアイコンを選ぶ（視認性UP）
+function iconForHeading(h) {
+  if (/推移|差分|比較/.test(h)) return "📊";
+  if (/最新|実績|業績|見通し/.test(h)) return "📈";
+  if (/ポテンシャル|上がる|強気|成長/.test(h)) return "🚀";
+  if (/リスク|下がる|懸念|悪化/.test(h)) return "⚠️";
+  if (/着眼|確認|フォロー/.test(h)) return "🔍";
+  if (/業界|競合|位置/.test(h)) return "🏭";
+  if (/セグメント|事業/.test(h)) return "🧩";
+  return "•";
+}
+
+// **太字** をReactに変換
+function renderInline(s) {
+  return s.split(/(\*\*[^*]+\*\*)/g).map((p, i) => {
+    const m = p.match(/^\*\*([^*]+)\*\*$/);
+    return m ? <strong key={i}>{m[1]}</strong> : <span key={i}>{p}</span>;
+  });
+}
+
+// 1セクションの本文を、箇条書き・段落・（差分は等幅表）に整形
+function RichBody({ heading, lines }) {
+  const isTable = heading && /推移|差分|比較/.test(heading);
+  if (isTable) {
+    const body = lines.join("\n").replace(/^\n+|\n+$/g, "");
+    return <pre className="rich-table">{body}</pre>;
+  }
+  const out = [];
+  let list = null;
+  const flush = () => {
+    if (list) {
+      out.push(
+        <ul key={`ul-${out.length}`} className="rich-ul">
+          {list}
+        </ul>
+      );
+      list = null;
+    }
+  };
+  lines.forEach((raw, idx) => {
+    const line = (raw || "").replace(/\s+$/, "");
+    if (!line.trim()) {
+      flush();
+      return;
+    }
+    const b = line.match(/^\s*(?:[-*・•]|\d+[.)])\s+(.*)/);
+    if (b) {
+      if (!list) list = [];
+      list.push(<li key={idx}>{renderInline(b[1])}</li>);
+    } else {
+      flush();
+      out.push(
+        <p key={idx} className="rich-p">
+          {renderInline(line)}
+        </p>
+      );
+    }
+  });
+  flush();
+  return <>{out}</>;
+}
+
+// 要約・分析の生Markdownを、見出し付きの読みやすい形に整形して表示
+function RichText({ text }) {
+  const lines = (text || "").split("\n");
+  const blocks = [];
+  let current = { heading: null, body: [] };
+  for (const line of lines) {
+    const h = line.match(/^\s*#{1,4}\s+(.*)/);
+    if (h) {
+      blocks.push(current);
+      current = { heading: h[1].trim(), body: [] };
+    } else {
+      current.body.push(line);
+    }
+  }
+  blocks.push(current);
+
+  return (
+    <div className="rich">
+      {blocks.map((b, i) =>
+        !b.heading && b.body.join("").trim() === "" ? null : (
+          <div key={i} className="rich-block">
+            {b.heading && (
+              <h4 className="rich-h">
+                <span className="rich-h-icon">{iconForHeading(b.heading)}</span>
+                {b.heading}
+              </h4>
+            )}
+            <RichBody heading={b.heading} lines={b.body} />
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [urls, setUrls] = useState(["", "", "", "", "", ""]);  const [documents, setDocuments] = useState([]);
   const [selected, setSelected] = useState({});
@@ -671,7 +768,7 @@ export default function Home() {
           <div className="chat">
             <div className="msg-ai">
               <strong>📊 分析レポート（これが「1つにまとまった出力」です）</strong>
-              <pre>{analysis}</pre>
+              <RichText text={analysis} />
             </div>
           </div>
         )}
@@ -695,7 +792,7 @@ export default function Home() {
               {summaries.map((s, i) => (
                 <div key={i} className="msg-ai">
                   <strong>{s.label}</strong>
-                  <pre>{s.text}</pre>
+                  <RichText text={s.text} />
                 </div>
               ))}
             </div>

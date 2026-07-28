@@ -264,3 +264,37 @@ body {
 .summaries-details .chat {
   padding: 8px 14px;
 }
+
+/* 要約・分析の整形表示（見出し・箇条書き・差分表） */
+.rich { font-size: 0.95rem; line-height: 1.7; color: #1a202c; }
+.rich-block { margin: 0 0 14px; }
+.rich-block:last-child { margin-bottom: 0; }
+.rich-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 8px;
+  padding: 6px 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1a365d;
+  background: #ebf2fb;
+  border-left: 4px solid #2b6cb0;
+  border-radius: 0 6px 6px 0;
+}
+.rich-block:first-child .rich-h { margin-top: 0; }
+.rich-h-icon { font-size: 1.05rem; }
+.rich-p { margin: 6px 0; }
+.rich-ul { margin: 6px 0; padding-left: 1.3em; }
+.rich-ul li { margin: 4px 0; }
+.rich-table {
+  margin: 8px 0;
+  padding: 12px 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  white-space: pre;
+}
