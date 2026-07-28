@@ -643,10 +643,10 @@ export default function Home() {
         </div>
 
         <div className="presets">
-          <button onClick={handleSummarize} disabled={summarizing} className="btn">
+          <button onClick={handleSummarize} disabled={summarizing || analyzing} className="btn">
             {summarizing ? "要約を作成中..." : "選択資料の要約を作成"}
           </button>
-          <button onClick={handleAnalyze} disabled={analyzing} className="btn">
+          <button onClick={handleAnalyze} disabled={analyzing || summarizing} className="btn">
             {analyzing ? "分析中..." : "選択資料の要約から分析"}
           </button>
           <label className="hint" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
