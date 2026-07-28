@@ -666,24 +666,40 @@ export default function Home() {
           </p>
         )}
 
-        {summaries.length > 0 && (
-          <div className="chat">
-            {summaries.map((s, i) => (
-              <div key={i} className="msg-ai">
-                <strong>{s.label}</strong>
-                <pre>{s.text}</pre>
-              </div>
-            ))}
-          </div>
-        )}
-
+        {/* まとまった出力＝分析レポート。一番上に大きく出す（複数期は「数字の推移（差分）」表に集約される） */}
         {analysis && (
           <div className="chat">
             <div className="msg-ai">
-              <strong>分析レポート</strong>
+              <strong>📊 分析レポート（これが「1つにまとまった出力」です）</strong>
               <pre>{analysis}</pre>
             </div>
           </div>
+        )}
+
+        {/* 要約ができたが、まだ分析していないときの案内 */}
+        {summaries.length > 0 && !analysis && !analyzing && (
+          <p className="hint">
+            各資料の要約ができました。<strong>「選択資料の要約から分析」</strong>を押すと、
+            複数期の数字を1つの表（差分）にまとめ、ポテンシャル／リスクを添えた
+            <strong>1つの分析レポート</strong>がここに出ます。
+          </p>
+        )}
+
+        {/* 各資料ごとの要約は「原文・出典の控え」。ふだんは畳んでおく（引用チェック用に残す） */}
+        {summaries.length > 0 && (
+          <details className="summaries-details">
+            <summary>
+              各資料の要約（原文・出典つきの控え）{summaries.length}件 — 必要なときだけ開く
+            </summary>
+            <div className="chat">
+              {summaries.map((s, i) => (
+                <div key={i} className="msg-ai">
+                  <strong>{s.label}</strong>
+                  <pre>{s.text}</pre>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </section>
 

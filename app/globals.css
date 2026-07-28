@@ -243,3 +243,24 @@ body {
   outline: none;
   border-color: #2b6cb0;
 }
+
+/* 各資料の要約の折りたたみ（原文・出典の控え） */
+.summaries-details {
+  margin-top: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.summaries-details > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  color: #4a5568;
+  font-size: 0.9rem;
+  user-select: none;
+}
+.summaries-details[open] > summary {
+  border-bottom: 1px solid #e2e8f0;
+}
+.summaries-details .chat {
+  padding: 8px 14px;
+}
