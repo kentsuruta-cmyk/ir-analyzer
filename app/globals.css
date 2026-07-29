@@ -334,3 +334,12 @@ body {
   border-color: #e2e8f0;
   cursor: not-allowed;
 }
+
+/* 1ステップずつ実行（補助）の折りたたみ */
+.stepwise { margin-top: 4px; }
+.stepwise > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #4a5568;
+  user-select: none;
+}

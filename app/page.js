@@ -412,6 +412,76 @@ export default function Home() {
     }
   }
 
+  // チェックした資料を、要約→分析まで1クリックで通す（あなたの選択どおりに処理）
+  async function handleSummarizeAndAnalyze() {
+    const targets = activeDocs.filter((d) => d.savedPath);
+    if (targets.length === 0) {
+      setError("要約→分析する資料（保存済みPDF）にチェックを入れてください");
+      return;
+    }
+    const company = companyName.trim() || deriveCompanyName(targets);
+    if (!company) {
+      setError("会社名を入力してください");
+      return;
+    }
+    if (!companyName.trim()) setCompanyName(company);
+    if (
+      targets.length > 5 &&
+      !window.confirm(
+        `${targets.length}件を要約→分析します。Opusで1件ずつ読むため時間とトークン消費が大きめです。続けますか？（必要な資料だけ選ぶことを推奨）`
+      )
+    ) {
+      return;
+    }
+    setError("");
+    setNotes([]);
+    const docPayload = targets.map((d) => ({ label: d.label, savedPath: d.savedPath }));
+
+    // 1) 要約（既に要約済みのものは自動スキップ・再課金なし）
+    setSummarizing(true);
+    try {
+      const sRes = await fetch("/api/summarize-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: company, documents: docPayload }),
+      });
+      const sData = await sRes.json();
+      if (sData.notes) setNotes(sData.notes);
+      if (!sRes.ok) throw new Error(sData.error || "要約に失敗しました");
+      setSummaries(sData.summaries || []);
+      if ((sData.summaries || []).length === 0) {
+        throw new Error("要約を作成できませんでした（対象PDFを読み取れず）。");
+      }
+    } catch (e) {
+      setError(e.message);
+      setSummarizing(false);
+      return;
+    }
+    setSummarizing(false);
+
+    // 2) 分析（上で作った選択資料の要約だけを対象に）
+    setAnalyzing(true);
+    try {
+      const aRes = await fetch("/api/analyze-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: company,
+          documents: docPayload,
+          profile: analysisProfile,
+          external: useExternal,
+        }),
+      });
+      const aData = await aRes.json();
+      if (!aRes.ok) throw new Error(aData.error || "分析に失敗しました");
+      setAnalysis(aData.analysis || "");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   async function handleAutoRun() {
     if (!companyName.trim()) {
       setError("会社名を入力してください");
@@ -722,11 +792,11 @@ export default function Home() {
               上の緑「<b>全自動</b>」を押した場合は、ここは不要です（収集→要約→分析まで済んでいます）。
             </li>
             <li>
-              個別にやるとき：資料棚で資料を<b>チェック</b> →「<b>選択資料の要約を作成</b>」→
-              要約が出たら「<b>選択資料の要約から分析</b>」の順に押します。
+              自分で選ぶとき：資料棚で必要な資料に<b>チェック</b> → 下の
+              「<b>② 選択した資料をまとめて要約 → 分析</b>」を1回押すだけ（要約してそのまま分析まで）。
             </li>
             <li>
-              要約せずに分析だけ押すと、要約が無い資料は分析できません（「先に要約を作成」と表示・課金なし）。
+              要約だけ・分析だけ個別にやりたいときは、その下の「1ステップずつ実行」を開いてください。
             </li>
           </ol>
         </div>
@@ -757,22 +827,40 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="presets">
-          <button onClick={handleSummarize} disabled={summarizing || analyzing} className="btn">
-            {summarizing ? "要約を作成中..." : "選択資料の要約を作成"}
-          </button>
-          <button onClick={handleAnalyze} disabled={analyzing || summarizing} className="btn">
-            {analyzing ? "分析中..." : "選択資料の要約から分析"}
-          </button>
-          <label className="hint" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={useExternal}
-              onChange={(e) => setUseExternal(e.target.checked)}
-            />
-            業界リサーチも入れる（競合・業界をWeb検索し、出典付きで分析に反映。要約は一次情報のまま。少し遅く・検索コスト）
-          </label>
-        </div>
+        {/* 主役：チェックした資料を、要約→分析まで1クリック */}
+        <button
+          onClick={handleSummarizeAndAnalyze}
+          disabled={summarizing || analyzing}
+          className="btn btn-primary"
+        >
+          {summarizing
+            ? "要約中..."
+            : analyzing
+            ? "分析中..."
+            : "② 選択した資料をまとめて要約 → 分析"}
+        </button>
+
+        <label className="hint" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", margin: "2px 0 10px" }}>
+          <input
+            type="checkbox"
+            checked={useExternal}
+            onChange={(e) => setUseExternal(e.target.checked)}
+          />
+          業界リサーチも入れる（競合・業界をWeb検索し、出典付きで分析に反映。要約は一次情報のまま。少し遅く・検索コスト）
+        </label>
+
+        {/* 補助：1ステップずつやりたいとき用 */}
+        <details className="stepwise">
+          <summary>1ステップずつ実行したいとき（要約だけ／分析だけ）</summary>
+          <div className="presets" style={{ marginTop: 8 }}>
+            <button onClick={handleSummarize} disabled={summarizing || analyzing} className="btn">
+              {summarizing ? "要約を作成中..." : "要約だけ作成"}
+            </button>
+            <button onClick={handleAnalyze} disabled={analyzing || summarizing} className="btn">
+              {analyzing ? "分析中..." : "要約済みから分析だけ"}
+            </button>
+          </div>
+        </details>
 
         {error && <div className="error">{error}</div>}
         {(summarizing || analyzing) && (
