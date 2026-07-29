@@ -313,3 +313,24 @@ body {
 .howto strong { color: #1a365d; }
 .howto ol { margin: 6px 0 0; padding-left: 1.4em; }
 .howto li { margin: 3px 0; }
+
+/* 全自動（おまかせ）＝脇役。アウトラインの控えめボタン */
+.btn-ghost {
+  background: transparent;
+  color: #4a5568;
+  border: 1px solid #cbd5e0;
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: #f7fafc;
+  border-color: #a0aec0;
+}
+.btn-ghost:disabled {
+  background: transparent;
+  color: #a0aec0;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+}

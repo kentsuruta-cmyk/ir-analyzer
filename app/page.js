@@ -614,29 +614,31 @@ export default function Home() {
           />
         ))}
 
-        <button
-          onClick={handleAutoRun}
-          disabled={autoRunning || collectingLocal}
-          className="btn btn-primary"
-        >
-          {autoRunning ? "全自動 実行中..." : "全自動（収集 → 要約 → 分析）"}
-        </button>
-        <p className="hint">
-          URLから、収集・保存・要約・分析までを一気に実行します。要約は「最新の決算短信・決算説明資料・有価証券報告書」を自動選別（Opusで精読）。全資料を要約したいときは下の個別ボタンを使ってください。
-        </p>
-
-        {autoStage && <p className="hint">進捗: {autoStage}</p>}
-
+        {/* まず「取り込む」を主役に。集めてから資料棚で選び、要約・分析へ。 */}
         <button
           onClick={handleCollectLocal}
           disabled={collectingLocal || autoRunning}
-          className="btn"
+          className="btn btn-primary"
         >
-          {collectingLocal ? "収集中..." : "取り込むだけ（PDFを保存）"}
+          {collectingLocal ? "取り込み中..." : "① 取り込む（PDFを保存）"}
         </button>
         <p className="hint">
-          ブラウザを自動操作して年度セレクタも辿り、PDFを ~/Documents/IR資料/ に保存します。数分かかることがあります。
+          まずこれ。IRページからPDFを集めて ~/Documents/IR資料/ に保存します。取り込んだあと、下の「資料棚」で<b>必要な資料だけ選んで</b>要約・分析します（いらない資料を処理せず、コストも無駄になりません）。数分かかることがあります。
         </p>
+
+        {/* おまかせ用（脇役）。最新資料を自動選別して一気に処理。 */}
+        <button
+          onClick={handleAutoRun}
+          disabled={autoRunning || collectingLocal}
+          className="btn btn-ghost"
+        >
+          {autoRunning ? "全自動 実行中..." : "全自動（収集 → 要約 → 分析）でおまかせ"}
+        </button>
+        <p className="hint">
+          自分で選ばず一気に済ませたいとき用。ただし要約・分析は「最新の決算短信・決算説明資料・有価証券報告書」を<b>自動で選んだぶんだけ</b>です。資料を自分で選びたいなら上の「① 取り込む」を使ってください。
+        </p>
+
+        {autoStage && <p className="hint">進捗: {autoStage}</p>}
 
         {savedDir && <p className="hint">保存先: {savedDir}</p>}
 
