@@ -696,17 +696,21 @@ export default function Home() {
           まずこれ。IRページからPDFを集めて ~/Documents/IR資料/ に保存します。取り込んだあと、下の「資料棚」で<b>必要な資料だけ選んで</b>要約・分析します（いらない資料を処理せず、コストも無駄になりません）。数分かかることがあります。
         </p>
 
-        {/* おまかせ用（脇役）。最新資料を自動選別して一気に処理。 */}
-        <button
-          onClick={handleAutoRun}
-          disabled={autoRunning || collectingLocal}
-          className="btn btn-ghost"
-        >
-          {autoRunning ? "全自動 実行中..." : "全自動（収集 → 要約 → 分析）でおまかせ"}
-        </button>
-        <p className="hint">
-          自分で選ばず一気に済ませたいとき用。ただし要約・分析は「最新の決算短信・決算説明資料・有価証券報告書」を<b>自動で選んだぶんだけ</b>です。資料を自分で選びたいなら上の「① 取り込む」を使ってください。
-        </p>
+        {/* おまかせ用（脇役）は折りたたみに畳んで、URL→取り込み→資料棚 の流れを乱さない */}
+        <details className="omakase" open={autoRunning}>
+          <summary>その他：全部おまかせで一気に処理する（自分で選ばない）</summary>
+          <button
+            onClick={handleAutoRun}
+            disabled={autoRunning || collectingLocal}
+            className="btn btn-ghost"
+            style={{ marginTop: 8 }}
+          >
+            {autoRunning ? "全自動 実行中..." : "全自動（収集 → 要約 → 分析）でおまかせ"}
+          </button>
+          <p className="hint">
+            自分で選ばず一気に済ませたいとき用。ただし要約・分析は「最新の決算短信・決算説明資料・有価証券報告書」を<b>自動で選んだぶんだけ</b>です。資料を自分で選びたいなら上の「① 取り込む」を使ってください。
+          </p>
+        </details>
 
         {autoStage && <p className="hint">進捗: {autoStage}</p>}
 

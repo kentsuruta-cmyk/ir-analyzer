@@ -343,3 +343,13 @@ body {
   color: #4a5568;
   user-select: none;
 }
+
+/* 全自動（おまかせ）の折りたたみ：主フローから外す */
+.omakase { margin-top: 6px; }
+.omakase > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #718096;
+  user-select: none;
+  padding: 2px 0;
+}
