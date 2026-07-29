@@ -298,3 +298,18 @@ body {
   line-height: 1.6;
   white-space: pre;
 }
+
+/* 3.要約・分析 の使い方ボックス */
+.howto {
+  margin: 4px 0 14px;
+  padding: 10px 14px;
+  background: #f0f7ff;
+  border: 1px solid #cfe0f5;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: #2d3748;
+  line-height: 1.6;
+}
+.howto strong { color: #1a365d; }
+.howto ol { margin: 6px 0 0; padding-left: 1.4em; }
+.howto li { margin: 3px 0; }
