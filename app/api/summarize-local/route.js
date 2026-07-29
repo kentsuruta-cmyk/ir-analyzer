@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { summarizePdf } from "../../../lib/summarize.js";
+import crypto from "crypto";
+import { summarizeConsolidated } from "../../../lib/summarize.js";
 import {
   getPageCount,
   withinLimits,
@@ -11,7 +12,7 @@ import {
 import { getCompanyDir } from "../../../lib/filesave.js";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 const IR_ROOT = path.join(os.homedir(), "Documents", "IR資料");
 
@@ -55,33 +56,19 @@ export async function POST(request) {
 
     const outDir = path.join(getCompanyDir(company), "_要約");
     const notes = [];
-    const summaries = [];
+    const prepared = []; // { pdfBase64, label, pdfPath }
 
+    // 選択された各PDFを準備（ページ超過は必要セクション抜粋、巨大/画像は除外）
     for (const doc of docs) {
       const label = doc.label || "資料";
       const pdfPath = safePdfPath(doc.savedPath);
       if (!pdfPath) {
-        notes.push(`${label} … 保存済みPDFが見つからず要約をスキップ`);
+        notes.push(`${label} … 保存済みPDFが見つからずスキップ`);
         continue;
       }
-
-      // 既に要約済み（_要約/*.md が存在）ならOpusを呼ばずに再利用（再課金なし・分割実行を可能に）
-      const mdPathEarly = path.join(outDir, path.basename(pdfPath).replace(/\.pdf$/i, "") + ".md");
-      if (fs.existsSync(mdPathEarly)) {
-        try {
-          const existing = fs.readFileSync(mdPathEarly, "utf8");
-          summaries.push({ label, savedPath: pdfPath, mdPath: mdPathEarly, text: existing });
-          notes.push(`${label} … 既に要約済み（スキップ）`);
-          continue;
-        } catch {}
-      }
-
       try {
         let buffer = fs.readFileSync(pdfPath);
-        let note = "";
 
-        // ページ数チェックはpdf-libで行うが、解析できないPDF（野村等の特殊構造）もある。
-        // 失敗してもページ数不明として続行し、そのままClaudeに渡す（Claudeの方が頑健）。
         let pageCount = null;
         try {
           pageCount = await getPageCount(buffer);
@@ -89,54 +76,78 @@ export async function POST(request) {
           pageCount = null;
         }
 
-        // ページ数が分かり、かつ上限超なら有報セクション抜粋を試みる
         if (pageCount != null && !withinLimits(buffer, pageCount)) {
           try {
             const { trimmed, reason, keptPages } = await trimToRelevantSections(buffer);
             if (trimmed) {
               buffer = trimmed;
-              note = `（${pageCount}頁→必要セクション${keptPages}頁に抜粋）`;
+              notes.push(`${label} … ${pageCount}頁→必要セクション${keptPages}頁に抜粋`);
             } else if (reason === "image") {
-              notes.push(
-                `${label} … ${pageCount}頁の画像PDFで${MAX_PAGES}頁を超えるため要約不可。NotebookLM推奨`
-              );
+              notes.push(`${label} … ${pageCount}頁の画像PDFで${MAX_PAGES}頁超のため除外。NotebookLM推奨`);
               continue;
             } else {
-              notes.push(
-                `${label} … ${pageCount}頁で${MAX_PAGES}頁を超え、章を特定できず要約不可。NotebookLM推奨`
-              );
+              notes.push(`${label} … ${pageCount}頁で章を特定できず除外。NotebookLM推奨`);
               continue;
             }
           } catch {
-            // 抜粋にも失敗した場合はそのままClaudeに渡す（上限超なら後段でエラーになる）
+            // 抜粋に失敗してもそのまま渡す（上限超なら後段でエラーになる）
           }
         }
 
-        // サイズが明確に上限超なら送らない（Claudeの32MB制限対策）
         if (buffer.length > 30 * 1024 * 1024) {
-          notes.push(`${label} … ファイルが大きすぎるため要約不可。NotebookLM推奨`);
+          notes.push(`${label} … ファイルが大きすぎるため除外。NotebookLM推奨`);
           continue;
         }
 
-        const summary = await summarizePdf({
-          pdfBase64: buffer.toString("base64"),
-          label,
-          apiKey,
-        });
-
-        fs.mkdirSync(outDir, { recursive: true });
-        const mdName = path.basename(pdfPath).replace(/\.pdf$/i, "") + ".md";
-        const mdPath = path.join(outDir, mdName);
-        fs.writeFileSync(mdPath, `# ${label} 要約\n\n出典PDF: ${pdfPath}\n\n${summary}\n`);
-
-        summaries.push({ label, savedPath: pdfPath, mdPath, text: summary });
-        notes.push(`${label} … 要約を作成${note}`);
+        prepared.push({ pdfBase64: buffer.toString("base64"), label, pdfPath });
       } catch (e) {
-        notes.push(`${label} … 要約失敗（${e.message}）`);
+        notes.push(`${label} … 読み込み失敗（${e.message}）`);
       }
     }
 
-    return Response.json({ summaries, notes, summaryDir: outDir });
+    if (prepared.length === 0) {
+      return Response.json(
+        { error: "要約できる資料がありませんでした（PDFを読み取れず）。", notes },
+        { status: 400 }
+      );
+    }
+
+    fs.mkdirSync(outDir, { recursive: true });
+
+    // 同じ資料の組み合わせは要約済みなら再利用（再課金なし）
+    const setKey = crypto
+      .createHash("sha256")
+      .update(prepared.map((p) => path.basename(p.pdfPath)).sort().join("|"))
+      .digest("hex")
+      .slice(0, 10);
+    const mdPath = path.join(outDir, `_統合サマリー_${setKey}.md`);
+
+    if (fs.existsSync(mdPath)) {
+      const text = fs.readFileSync(mdPath, "utf8").replace(/^#[^\n]*\n[\s\S]*?\n\n/, "");
+      notes.push("同じ資料の組み合わせは要約済み（スキップ・再課金なし）");
+      return Response.json({ summaries: [{ label: "事実サマリー", text }], notes, summaryDir: outDir });
+    }
+
+    // 複数PDFをまとめて1枚の事実サマリーに
+    const text = await summarizeConsolidated({
+      documents: prepared.map(({ pdfBase64, label }) => ({ pdfBase64, label })),
+      apiKey,
+    });
+
+    if (!text) {
+      return Response.json(
+        { error: "事実サマリーを生成できませんでした（対象PDFを読み取れず）。", notes },
+        { status: 502 }
+      );
+    }
+
+    const header = `# 事実サマリー（統合）\n\n対象資料:\n${prepared
+      .map((p) => `- ${p.label}`)
+      .join("\n")}\n\n`;
+    fs.writeFileSync(mdPath, header + text + "\n");
+    notes.push(`${prepared.length}件をまとめて事実サマリーを作成`);
+
+    return Response.json({ summaries: [{ label: "事実サマリー", text }], notes, summaryDir: outDir });
   } catch (e) {
     return Response.json({ error: `エラー: ${e.message}` }, { status: 500 });
   }

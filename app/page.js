@@ -348,7 +348,7 @@ export default function Home() {
     if (
       targets.length > 5 &&
       !window.confirm(
-        `${targets.length}件を要約します。Opusで1件ずつ読むため時間（数分〜十数分）とトークン消費が大きめです。続けますか？（必要な資料だけ選ぶことを推奨）`
+        `${targets.length}件を要約します。Opusがまとめて精読するため時間（数分〜十数分）とトークン消費が大きめです。続けますか？（必要な資料だけ選ぶことを推奨）`
       )
     ) {
       return;
@@ -391,13 +391,17 @@ export default function Home() {
     setAnalyzing(true);
     setError("");
     try {
+      // 作成済みの事実サマリーがあればそれを分析対象にする。無ければ選択資料から読む。
+      const summaryPayload =
+        summaries.length > 0
+          ? { summaries: summaries.map((s) => ({ label: s.label, text: s.text })) }
+          : { documents: targets.map((d) => ({ label: d.label, savedPath: d.savedPath })) };
       const res = await fetch("/api/analyze-local", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // 選択中の資料の要約だけを分析対象にする（フォルダ内の古い要約の混入を防ぐ）
           companyName: company,
-          documents: targets.map((d) => ({ label: d.label, savedPath: d.savedPath })),
+          ...summaryPayload,
           profile: analysisProfile,
           external: useExternal,
         }),
@@ -428,7 +432,7 @@ export default function Home() {
     if (
       targets.length > 5 &&
       !window.confirm(
-        `${targets.length}件を要約→分析します。Opusで1件ずつ読むため時間とトークン消費が大きめです。続けますか？（必要な資料だけ選ぶことを推奨）`
+        `${targets.length}件を要約→分析します。Opusがまとめて精読するため時間とトークン消費が大きめです。続けますか？（必要な資料だけ選ぶことを推奨）`
       )
     ) {
       return;
@@ -436,8 +440,9 @@ export default function Home() {
     setError("");
     setNotes([]);
     const docPayload = targets.map((d) => ({ label: d.label, savedPath: d.savedPath }));
+    let consolidated = [];
 
-    // 1) 要約（既に要約済みのものは自動スキップ・再課金なし）
+    // 1) 要約（選択資料をまとめて事実サマリー1枚に。同じ組み合わせは再利用・再課金なし）
     setSummarizing(true);
     try {
       const sRes = await fetch("/api/summarize-local", {
@@ -448,9 +453,10 @@ export default function Home() {
       const sData = await sRes.json();
       if (sData.notes) setNotes(sData.notes);
       if (!sRes.ok) throw new Error(sData.error || "要約に失敗しました");
-      setSummaries(sData.summaries || []);
-      if ((sData.summaries || []).length === 0) {
-        throw new Error("要約を作成できませんでした（対象PDFを読み取れず）。");
+      consolidated = sData.summaries || [];
+      setSummaries(consolidated);
+      if (consolidated.length === 0) {
+        throw new Error("事実サマリーを作成できませんでした（対象PDFを読み取れず）。");
       }
     } catch (e) {
       setError(e.message);
@@ -459,7 +465,7 @@ export default function Home() {
     }
     setSummarizing(false);
 
-    // 2) 分析（上で作った選択資料の要約だけを対象に）
+    // 2) 分析（作った事実サマリーを土台に投資判断を出す）
     setAnalyzing(true);
     try {
       const aRes = await fetch("/api/analyze-local", {
@@ -467,7 +473,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           companyName: company,
-          documents: docPayload,
+          summaries: consolidated.map((s) => ({ label: s.label, text: s.text })),
           profile: analysisProfile,
           external: useExternal,
         }),
@@ -565,7 +571,7 @@ export default function Home() {
       const ok = window.confirm(
         `全自動で ${core.length} 件（${core
           .map((d) => d.docType)
-          .join("・")}）を要約→分析します。Opusで1件ずつ読むため数分かかり、トークン消費も大きめです。続けますか？`
+          .join("・")}）を要約→分析します。Opusがまとめて精読するため数分かかり、トークン消費も大きめです。続けますか？`
       );
       if (!ok) {
         setAutoStage("");
@@ -784,9 +790,9 @@ export default function Home() {
       </section>
 
       <section className="card">
-        <h2 className="card-title">3. 要約・分析（一次情報を正確に）</h2>
+        <h2 className="card-title">3. 要約・分析（投資判断用）</h2>
         <p className="hint">
-          選択中の保存済みPDFをOpusが直接読み、原文引用・出典ページ付きで要約します。数字が命の用途向け。トークン消費は大きめなので、必要な資料だけ選んでください。有価証券報告書など100頁超はMD&A・経理などの必要セクションを自動抜粋します。
+          選んだ複数期の資料をOpusがまとめて読み、<b>1枚の「事実サマリー」</b>（数値の推移・変化点だけ・最新の見通し／原文引用付き）を作り、それを土台に<b>投資判断（ポテンシャル・リスク）</b>を出します。四半期ごとの繰り返しはしません。トークン消費は大きめなので、各期の代表資料（決算短信など）を選ぶのがおすすめです。有報など100頁超は必要セクションを自動抜粋します。
         </p>
 
         <div className="howto">
@@ -858,10 +864,10 @@ export default function Home() {
           <summary>1ステップずつ実行したいとき（要約だけ／分析だけ）</summary>
           <div className="presets" style={{ marginTop: 8 }}>
             <button onClick={handleSummarize} disabled={summarizing || analyzing} className="btn">
-              {summarizing ? "要約を作成中..." : "要約だけ作成"}
+              {summarizing ? "作成中..." : "事実サマリーだけ作成"}
             </button>
             <button onClick={handleAnalyze} disabled={analyzing || summarizing} className="btn">
-              {analyzing ? "分析中..." : "要約済みから分析だけ"}
+              {analyzing ? "分析中..." : "投資判断だけ（サマリーから）"}
             </button>
           </div>
         </details>
@@ -873,12 +879,12 @@ export default function Home() {
           </p>
         )}
 
-        {/* まとまった出力＝分析レポート。一番上に大きく出す（複数期は「数字の推移（差分）」表に集約される） */}
-        {analysis && (
+        {/* 事実サマリー（数値の推移・変化点・最新の見通し）を1枚で表示 */}
+        {summaries.length > 0 && (
           <div className="chat">
             <div className="msg-ai">
-              <strong>📊 分析レポート（これが「1つにまとまった出力」です）</strong>
-              <RichText text={analysis} />
+              <strong>📄 事実サマリー（数値の推移・変化点・最新の見通し）</strong>
+              <RichText text={summaries[0].text} />
             </div>
           </div>
         )}
@@ -886,27 +892,19 @@ export default function Home() {
         {/* 要約ができたが、まだ分析していないときの案内 */}
         {summaries.length > 0 && !analysis && !analyzing && (
           <p className="hint">
-            各資料の要約ができました。<strong>「選択資料の要約から分析」</strong>を押すと、
-            複数期の数字を1つの表（差分）にまとめ、ポテンシャル／リスクを添えた
-            <strong>1つの分析レポート</strong>がここに出ます。
+            事実サマリーができました。続けて<strong>投資判断</strong>を出すには、上の
+            「② 選択した資料をまとめて要約 → 分析」（または「1ステップずつ」の分析だけ）を押してください。
           </p>
         )}
 
-        {/* 各資料ごとの要約は「原文・出典の控え」。ふだんは畳んでおく（引用チェック用に残す） */}
-        {summaries.length > 0 && (
-          <details className="summaries-details">
-            <summary>
-              各資料の要約（原文・出典つきの控え）{summaries.length}件 — 必要なときだけ開く
-            </summary>
-            <div className="chat">
-              {summaries.map((s, i) => (
-                <div key={i} className="msg-ai">
-                  <strong>{s.label}</strong>
-                  <RichText text={s.text} />
-                </div>
-              ))}
+        {/* 投資判断（ポテンシャル・リスク） */}
+        {analysis && (
+          <div className="chat">
+            <div className="msg-ai">
+              <strong>📊 投資判断（ポテンシャル・リスク）</strong>
+              <RichText text={analysis} />
             </div>
-          </details>
+          </div>
         )}
       </section>
 
