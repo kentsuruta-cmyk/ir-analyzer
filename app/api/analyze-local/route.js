@@ -6,7 +6,7 @@ import { getCompanyDir } from "../../../lib/filesave.js";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const ANALYSIS_MODEL = "claude-opus-4-8";
+const ANALYSIS_MODEL = "claude-opus-5";
 const MAX_TOTAL_CHARS = 150000;
 
 const RULES = `あなたは経験豊富な株式投資アナリストです。与えられた「要約（企業の一次情報を忠実に抽出したもの）」を土台に分析します。読み手が短時間で判断できる、簡潔な投資メモを書きます。
