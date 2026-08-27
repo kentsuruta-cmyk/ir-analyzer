@@ -571,15 +571,16 @@ function fillPeriodFields(p) {
 function findSameQuarterPrevYear(periods, p) {
   const y = fyNumber(p.fiscal_year);
   if (y == null || !p.quarter_label) return null;
-  return (
-    periods.find(
-      (q) =>
-        !q.is_forecast &&
-        q.quarter_label === p.quarter_label &&
-        q.is_cumulative === p.is_cumulative &&
-        fyNumber(q.fiscal_year) === y - 1
-    ) || null
+
+  const prevYear = periods.filter(
+    (q) => !q.is_forecast && q.quarter_label === p.quarter_label && fyNumber(q.fiscal_year) === y - 1
   );
+  if (prevYear.length === 0) return null;
+
+  // 累計/単独まで一致するものを優先する。
+  // ただし資料によって「第2四半期累計」「中間期」など表記が揺れるので、
+  // 完全一致が無ければ同じ四半期であることだけを条件に拾う（比較先を見失わせない）。
+  return prevYear.find((q) => q.is_cumulative === p.is_cumulative) || prevYear[0];
 }
 
 // 最新の実績を「前年の同じ四半期」と比べて、伸びているかを矢印1文字で表す。
@@ -1597,25 +1598,31 @@ export default function Home() {
     }
     if (!silent) setRestoring(true);
     try {
+      // 業績表は要約・分析とは独立して保存されるので、先に読む。
+      // 後ろに置くと「業績表はあるが分析はまだ」のときに早期リターンで復元されない。
+      let hasMetrics = false;
+      try {
+        const mres = await fetch(`/api/metrics-local?company=${encodeURIComponent(company)}`);
+        const mdata = await mres.json();
+        if (mdata.metrics) {
+          setMetrics(mdata.metrics);
+          hasMetrics = true;
+        }
+      } catch {
+        // 業績表が戻せなくても要約・分析の復元は続ける
+      }
+
       const res = await fetch(`/api/saved-local?company=${encodeURIComponent(company)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存済みの分析を読み込めませんでした");
       if (!data.analysis && !data.summary) {
-        if (!silent) setError("この会社の保存済みの分析はまだありません");
+        if (!silent && !hasMetrics) setError("この会社の保存済みの分析はまだありません");
         return;
       }
       if (data.summary?.text) setSummaries([{ label: "事実サマリー", text: data.summary.text }]);
       if (data.analysis?.text) {
         setAnalysis(data.analysis.text);
         setSavedAt(data.analysis.savedAt || "");
-      }
-      // 業績表もディスクから戻す（画面リロードで消えないように）
-      try {
-        const mres = await fetch(`/api/metrics-local?company=${encodeURIComponent(company)}`);
-        const mdata = await mres.json();
-        if (mdata.metrics) setMetrics(mdata.metrics);
-      } catch {
-        // 業績表が戻せなくても要約・分析の復元は成功させる
       }
     } catch (e) {
       if (!silent) setError(e.message);
