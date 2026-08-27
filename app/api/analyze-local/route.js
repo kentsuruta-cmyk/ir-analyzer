@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { getCompanyDir } from "../../../lib/filesave.js";
 
@@ -9,6 +10,12 @@ export const maxDuration = 300;
 const ANALYSIS_MODEL = "claude-opus-5";
 const MAX_TOTAL_CHARS = 150000;
 
+// 実行中／直近に終わった分析を、入力の内容をキーにして共有するための置き場。
+// ブラウザは長時間リクエストが切れると同じ分析をもう一度投げる（page.js の fetchLongRunning）。
+// 束ねないとOpusが二重に走り、画面に出る本文とディスクに保存される本文が別々の実行結果になる。
+const jobCache = new Map();
+const JOB_TTL_MS = 15 * 60 * 1000;
+
 const RULES = `あなたは経験豊富な株式投資アナリストです。与えられた「事実サマリー（企業の一次情報を、数値の推移・変化点・最新の見通しに絞って忠実にまとめたもの）」を土台に、投資判断を述べます。数値の推移そのものは事実サマリー側に既にあるので、分析では繰り返しません。
 
 【絶対に守るルール】
@@ -16,17 +23,44 @@ const RULES = `あなたは経験豊富な株式投資アナリストです。�
 2. 数字の表や網羅的な数値の羅列はしない（それは事実サマリーの役割）。判断の根拠として必要な数字だけ、最小限を引用する。
 3. 「事実（サマリーからの引用）」と「あなたの解釈・見立て（【所見】）」を分ける。サマリーに根拠が無いことは「サマリーからは判断できません」と明記する。
 4. 確度が低い点は正直に述べる。断定より正確さを優先する。
+5. 出典は〔資料名 P.x〕の形で書く。<cite> などのHTMLタグは使わない。
 
-【出力（日本語・ですます調・簡潔に）】
+【投資妙味ランクの基準】
+提供された事実サマリーの範囲だけで、会社の開示ベースの状態を相対評価します。株価水準・割安割高（バリュエーション）は判断材料に無いので考慮しません。将来の成果を保証するものではありません。
+「魅力度（A〜D）」と「そもそも判断できるか（判定不能）」は別の軸です。魅力度で迷ったらCに置き、材料が薄くて置けないときだけ判定不能にします。
+- A（積極的に妙味あり）：増収増益・利益率改善・上方修正・受注/需要の追い風など、会社自身の開示ベースで明確な前向き材料があり、目立った下振れ材料が乏しい。
+- B（妙味あり・条件付き）：前向き材料はあるが、条件や懸念が残る。特定の条件（受注回復・コスト一巡・特定セグメントの改善など）が確認できれば妙味が増す。
+- C（中立・様子見）：良い面と悪い面が拮抗し決め手に欠ける、または横ばい。積極的に買う根拠も避ける根拠も強くない。
+- D（見送り・要警戒）：減収減益・下方修正・特別損失・需要悪化など逆風が優勢。
+- 判定不能（情報不足）：開示が薄い／要約に材料が乏しく、A〜Dのどこにも根拠を持って置けない。これは「魅力度が低い」のではなく「判断保留」であり、次にすべきは処分ではなく追加調査。安易な逃げ場にせず、本当に材料が足りないときだけ使う。
+
+【出力の形（厳守）】
+下の見出しを、この順番で、過不足なく出します。**毎回まったく同じ構成**にしてください。
+- 見出しの文言は1文字も変えない（記号・かっこを含む）。
+- ここに無い見出しを足さない（「総合判断」「まとめ」「投資判断」などを勝手に作らない）。
+- 冒頭にレポートのタイトル（# 見出し）や「承知しました」などの前置きを書かない。**最初の行は必ず「## 投資妙味ランク：」で始める**。
+- 下に【分析者の視点】がある場合、それは文体と着眼点にだけ効かせ、この構成は変えない。
+- 見出しの順番も入れ替えない。
+
+（日本語・ですます調・簡潔に）
+
+## 投資妙味ランク：A / B / C / D / 判定不能
+（先頭でA・B・C・D・判定不能のいずれか1つを明示。続けて、そのランクにした理由を事実サマリーの材料に結びつけて1〜2行。上の基準に従う。ランクは資料ベースの相対評価であり株価の割安割高は含まないことを一言添える。「判定不能」を選んだ場合は、何の情報が足りないのか・どの資料を追加で見れば判断できるのかを必ず具体的に書く）
 
 ## 総括
 （結論から2〜3行。今どういう局面か、投資妙味の有無を端的に）
+
+## 業界内での位置づけ
+（同業・業界の中でこの会社がどこにいるか。外部情報が使える設定のときは、競合や市場動向を出典付きで書く。外部情報が使えない設定のときは「外部情報を使わない設定のため、業界内の比較は行っていません」と1行だけ書く）
 
 ## ポテンシャル（こうなれば上がる）
 （【所見】上振れにつながる条件・イベント。箇条書き2〜4点。事実サマリーの変化点や見通しと関連づける）
 
 ## リスク（こうなれば下がる）
 （【所見】下振れ・悪化につながる要因。箇条書き2〜4点）
+
+## この業種で特に見るべき数字
+（まず、事実サマリーから判断できる業種・ビジネスモデルを一言で述べる。その業種で業績・株価を左右しやすい指標を2〜4個挙げ、なぜその業種でその指標が効くのかを一言添える〔例：小売なら既存店売上高・在庫、メーカーなら受注残・粗利率・稼働率、金融なら自己資本比率・与信費用、SaaSなら解約率・ARR〕。各指標について、今この会社がどの水準・どの方向かを事実サマリーの数値を引用して短くコメントする。該当数値がサマリーに無い指標は「サマリーには記載なし・次回要確認」と書く）
 
 ## 着眼点（次に確認すべきこと）
 （今後フォローすべき数字・イベントを箇条書きで数点）`;
@@ -128,7 +162,7 @@ export async function POST(request) {
   ・**会社自身の実績数値・見通し**は、必ず「事実サマリー」からのみ引く（外部の数字で上書きしない）。
   ・**外部（業界・競合）由来の記述**には、必ずその場に出典（媒体名・可能ならURL・時期）を添える。裏取りできない噂・古い情報は書かない。
 - 外部情報は独立セクションに隔離せず、「総括」「ポテンシャル」「リスク」「着眼点」の中で、会社の実績と関連づけて自然に使う。ただし読み手が「これは外部の話」と分かるよう、出典で明示する。
-- 業界内での立ち位置がひと目で分かるよう、必要なら「## 業界内での位置づけ」を1つ加えてよい（競合との簡単な比較。各記述に出典）。`
+- 「## 業界内での位置づけ」には、外部で調べた競合・業界の情報を出典付きで書く（見出しは固定。増やしも減らしもしない）。`
       : "";
 
     const system = `${RULES}${profileBlock}${externalBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
@@ -139,38 +173,96 @@ export async function POST(request) {
       ? [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }]
       : undefined;
 
-    // Web検索はサーバー側でループするため、上限に達すると stop_reason=pause_turn で返る。
-    // その場合は会話を継ぎ足して再開する。
-    const messages = [{ role: "user", content: userText }];
-    let response;
-    for (let i = 0; i < 6; i++) {
-      response = await anthropic.messages.create({
-        model: ANALYSIS_MODEL,
-        max_tokens: 6000,
-        system,
-        messages,
-        ...(tools ? { tools } : {}),
-      });
-      if (response.stop_reason !== "pause_turn") break;
-      messages.push({ role: "assistant", content: response.content });
+    async function runAnalysis() {
+      // Web検索はサーバー側でループするため、上限に達すると stop_reason=pause_turn で返る。
+      // その場合は会話を継ぎ足して再開する。
+      // 重要：本文は「最後の応答」だけでなく毎ターン集める。
+      // 中断前のターンに書かれた文章（＝先頭の「投資妙味ランク」など）が捨てられるのを防ぐ。
+      const messages = [{ role: "user", content: userText }];
+      const parts = [];
+      for (let i = 0; i < 6; i++) {
+        const response = await anthropic.messages.create({
+          model: ANALYSIS_MODEL,
+          max_tokens: 16000,
+          system,
+          messages,
+          ...(tools ? { tools } : {}),
+        });
+        const turnText = response.content
+          .filter((b) => b.type === "text")
+          .map((b) => b.text)
+          .join("\n")
+          .trim();
+        if (turnText) parts.push(turnText);
+        if (response.stop_reason !== "pause_turn") break;
+        messages.push({ role: "assistant", content: response.content });
+      }
+
+      let analysis = parts.join("\n\n").trim();
+
+      // ランクが本文に無いまま返ってくることが稀にある（検索での中断や指示の取りこぼし）。
+      // 画面の要になる部分なので、その場で書き足させる（短い追加呼び出し1回）。
+      if (analysis && !/投資妙味ランク\s*[：:]/.test(analysis)) {
+        try {
+          const fix = await anthropic.messages.create({
+            model: ANALYSIS_MODEL,
+            max_tokens: 700,
+            system: `${RULES}\n\n【今回の依頼】上の基準に従い、「## 投資妙味ランク：」の行と、その理由（1〜2行）だけを出力してください。他の見出しや本文は書かないでください。`,
+            messages: [
+              {
+                role: "user",
+                content: `次の分析はあなたが書いたものです。この内容だけに基づいて、投資妙味ランクの見出し行と理由を出力してください。\n\n${analysis.slice(0, 60000)}`,
+              },
+            ],
+          });
+          const rankText = fix.content
+            .filter((b) => b.type === "text")
+            .map((b) => b.text)
+            .join("\n")
+            .trim();
+          if (/投資妙味ランク\s*[：:]/.test(rankText)) {
+            analysis = `${rankText}\n\n${analysis}`;
+          }
+        } catch {
+          // 補完に失敗しても本体の分析は返す（画面には「記載が見つかりません」と出る）
+        }
+      }
+
+      const outDir = path.join(getCompanyDir(company), "_分析");
+      fs.mkdirSync(outDir, { recursive: true });
+      const stamp = new Date().toISOString().slice(0, 10);
+      const mdPath = path.join(outDir, `${company}_分析_${stamp}.md`);
+      fs.writeFileSync(
+        mdPath,
+        `# ${company} 分析（${stamp}）\n\n対象要約: ${included.join(" / ")}\n\n${analysis}\n`
+      );
+      return { analysis, mdPath };
     }
 
-    const analysis = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n")
-      .trim();
+    // 同じ入力の分析が走っていれば、それを待って同じ本文を返す（二重実行・二重課金を防ぐ）。
+    const jobKey = crypto
+      .createHash("sha256")
+      .update(
+        [company, ANALYSIS_MODEL, userText, profile || "", external ? "web" : "no-web", block].join("\u0000")
+      )
+      .digest("hex");
 
-    const outDir = path.join(getCompanyDir(company), "_分析");
-    fs.mkdirSync(outDir, { recursive: true });
-    const stamp = new Date().toISOString().slice(0, 10);
-    const mdPath = path.join(outDir, `${company}_分析_${stamp}.md`);
-    fs.writeFileSync(
-      mdPath,
-      `# ${company} 分析（${stamp}）\n\n対象要約: ${included.join(" / ")}\n\n${analysis}\n`
-    );
+    let job = jobCache.get(jobKey);
+    const reused = Boolean(job);
+    if (!job) {
+      job = runAnalysis();
+      jobCache.set(jobKey, job);
+      job.then(
+        () => {
+          const t = setTimeout(() => jobCache.delete(jobKey), JOB_TTL_MS);
+          if (typeof t.unref === "function") t.unref();
+        },
+        () => jobCache.delete(jobKey)
+      );
+    }
+    const { analysis, mdPath } = await job;
 
-    return Response.json({ analysis, analysisPath: mdPath, included });
+    return Response.json({ analysis, analysisPath: mdPath, included, reused });
   } catch (e) {
     return Response.json({ error: `エラー: ${e.message}` }, { status: 500 });
   }

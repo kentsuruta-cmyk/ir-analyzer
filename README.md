@@ -34,7 +34,8 @@ npm run dev
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-収集したPDFは `~/Documents/IR資料/{会社名}/` 以下に保存される。
+収集したPDFは `~/IR資料/{会社名}/` 以下に保存される（`IR_DATA_DIR` で変更可）。
+`~/Documents` は macOS のプライバシー保護(TCC)対象で、launchd から常駐起動したプロセスが読めないため、ここを保存先にしていない。`~/Documents/IR資料` にはシンボリックリンクを置いてあるので Finder からは従来どおり開ける。
 
 ### 全自動（収集→要約→分析）
 

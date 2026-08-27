@@ -265,6 +265,82 @@ body {
   padding: 8px 14px;
 }
 
+/* 投資妙味ランクのバッジ（分析の先頭で一目でわかるように） */
+.rank-card {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  margin: 12px 0 18px;
+  padding: 14px 16px;
+  border: 2px solid var(--rank-line, #cbd5e1);
+  border-left-width: 8px;
+  border-radius: 10px;
+  background: var(--rank-bg, #f8fafc);
+}
+
+.rank-mark {
+  flex: none;
+  width: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--rank-fg, #4a5568);
+}
+
+.rank-mark-sm {
+  font-size: 19px;
+  width: 76px;
+  text-align: center;
+}
+
+.rank-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.rank-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.rank-label {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--rank-fg, #1a202c);
+}
+
+.rank-reason {
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: #334155;
+  margin: 2px 0 0;
+}
+
+.rank-reason .rich-p { margin: 2px 0; }
+
+.rank-a { --rank-fg: #15803d; --rank-bg: #eefaf2; --rank-line: #34a853; }
+.rank-b { --rank-fg: #1d4ed8; --rank-bg: #eef4ff; --rank-line: #3b82f6; }
+.rank-c { --rank-fg: #a16207; --rank-bg: #fdf7e7; --rank-line: #eab308; }
+.rank-d { --rank-fg: #b42318; --rank-bg: #fdeeec; --rank-line: #ef4444; }
+.rank-na,
+.rank-none { --rank-fg: #475569; --rank-bg: #f1f5f9; --rank-line: #94a3b8; }
+
+@media (max-width: 520px) {
+  .rank-card { gap: 10px; padding: 12px; }
+  .rank-mark { width: 52px; font-size: 34px; }
+  .rank-mark-sm { width: 62px; font-size: 16px; }
+  .rank-label { font-size: 16px; }
+}
+
 /* 要約・分析の整形表示（見出し・箇条書き・差分表） */
 .rich { font-size: 0.95rem; line-height: 1.7; color: #1a202c; }
 .rich-block { margin: 0 0 14px; }
@@ -287,11 +363,133 @@ body {
 .rich-p { margin: 6px 0; }
 .rich-ul { margin: 6px 0; padding-left: 1.3em; }
 .rich-ul li { margin: 4px 0; }
+/* 数値表：白地＋罫線。横に長い場合だけスクロールする */
+.rich-table-wrap {
+  margin: 10px 0;
+  overflow-x: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
 .rich-table {
+  border-collapse: collapse;
+  width: 100%;
+  background: #fff;
+  color: #1f2937;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.rich-table th,
+.rich-table td {
+  border: 1px solid #e2e8f0;
+  padding: 7px 12px;
+  vertical-align: top;
+}
+
+.rich-table .rt-val {
+  white-space: normal;
+}
+
+/* 数値のかたまり。この単位では折り返さない */
+.rich-table .rt-tok {
+  white-space: nowrap;
+}
+
+/* かっこ書きの補足（前年同期比など）は数値の下に小さく回り込ませる */
+.rich-table .rt-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.82em;
+  line-height: 1.45;
+  color: #475569;
+  white-space: normal;
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+.rich-table .rt-src {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.78em;
+  line-height: 1.45;
+  color: #64748b;
+  white-space: normal;
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-weight: 400;
+}
+
+.rich-table-block {
+  margin: 10px 0;
+}
+
+/* 出典の表示切り替え */
+.rt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  color: #475569;
+  cursor: pointer;
+}
+
+/* 外周は .rich-table-wrap 側の枠線に任せる */
+.rich-table tr > *:first-child { border-left: none; }
+.rich-table tr > *:last-child { border-right: none; }
+.rich-table thead tr:first-child > * { border-top: none; }
+.rich-table tbody tr:last-child > * { border-bottom: none; }
+
+.rich-table th {
+  background: #f1f5f9;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.rich-table th:first-child { text-align: left; }
+
+/* 指標名は左寄せ。1文字ずつ縦に折り返さないよう最低幅を持たせる。
+   横に長い表を右へスクロールしても指標名が見えるよう、1列目は貼り付けておく
+   （border-collapse: collapse だと sticky セルの罫線が消えるので影で代用）。 */
+.rich-table .rt-label {
+  text-align: left;
+  white-space: normal;
+  min-width: 9em;
+  font-weight: 500;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #fff;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+.rich-table tbody tr:nth-child(even) .rt-label { background: #fafbfc; }
+
+.rich-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #f1f5f9;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+.rich-table .rt-num {
+  text-align: right;
+  max-width: 16em;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.rich-table tbody tr:nth-child(even) { background: #fafbfc; }
+
+/* 旧形式（半角スペースで桁揃え）の要約用フォールバック */
+.rich-table-pre {
   margin: 8px 0;
   padding: 12px 14px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #fff;
+  color: #1f2937;
+  border: 1px solid #cbd5e1;
   border-radius: 8px;
   overflow-x: auto;
   font-size: 0.88rem;
@@ -353,3 +551,309 @@ body {
   user-select: none;
   padding: 2px 0;
 }
+
+/* 取り込む決算期の下限 */
+.minfy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 2px;
+  font-size: 0.86rem;
+  color: #475569;
+}
+
+.minfy-input {
+  width: 6.5em;
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+/* 新しい会社を始める（全部クリア） */
+.btn-reset {
+  background: #fff;
+  border: 1px solid #d5d8dd;
+  color: #64748b;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-reset:hover {
+  border-color: #c53030;
+  color: #c53030;
+}
+
+/* 質問への添付ファイル */
+.attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #334155;
+  background: #eef3f9;
+  border: 1px solid #d6e2f0;
+  border-radius: 20px;
+  max-width: 100%;
+}
+
+.attach-size { color: #94a3b8; font-size: 11px; }
+
+.attach-remove {
+  border: none;
+  background: none;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.attach-remove:hover { color: #c53030; }
+
+.attach-error { color: #c53030; }
+
+.btn-attach {
+  background: #fff;
+  color: #2b6cb0;
+  border: 1px solid #cbd8e6;
+}
+
+.btn-attach:disabled { color: #9aa5b1; border-color: #e2e8f0; background: #fff; }
+
+/* 保存済みファイルから復元して表示していることの表示 */
+.saved-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #dbe2ea;
+  border-radius: 20px;
+  vertical-align: middle;
+}
+
+/* ── 業績テーブル ─────────────────────────────────────────────
+   罫線をはっきり出すことを最優先にしている。淡いグレー(#e2e8f0)だと
+   白背景で線が消えて「表に見えない」ため、線は #94a3b8 以上の濃さにする。 */
+.perf {
+  margin: 14px 0 18px;
+}
+.perf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.perf-title {
+  font-size: 14px;
+  color: #1f2937;
+}
+.perf-toggle {
+  font-size: 11px;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.perf-scroll {
+  overflow-x: auto;
+  border: 2px solid #64748b;
+  border-radius: 8px;
+  background: #fff;
+}
+.perf-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+/* 全セルに実線。ここが「罫線がちゃんとある」の要 */
+.perf-table th,
+.perf-table td {
+  border: 1px solid #94a3b8;
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: right;
+  white-space: nowrap;
+}
+.perf-table thead th {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 700;
+  text-align: center;
+  position: sticky;
+  top: 0;
+}
+.perf-metric-head,
+.perf-metric {
+  text-align: left !important;
+  background: #f8fafc;
+  font-weight: 700;
+  color: #0f172a;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.perf-forecast-head {
+  background: #fff7ed !important;
+  color: #9a3412 !important;
+}
+.perf-forecast {
+  background: #fffbf5;
+}
+.perf-badge {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #c2410c;
+  margin-top: 2px;
+}
+.perf-val {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #0f172a;
+}
+.perf-yoy {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+/* 原文に前年同期比が無いときだけ、この画面で計算した値を出す（区別できるよう点線） */
+.perf-calc {
+  border-bottom: 1px dotted #cbd5e1;
+  display: inline-block;
+}
+.perf-src {
+  display: block;
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 3px;
+  white-space: normal;
+}
+.cell-up .perf-val { color: #15803d; }
+.cell-down .perf-val { color: #b91c1c; }
+.perf-empty { color: #cbd5e1; text-align: center; }
+
+.perf-trend-head { background: #eef2ff !important; }
+.perf-trend { text-align: center; background: #f8fafc; }
+.trend-mark { display: block; font-size: 18px; line-height: 1; }
+.trend-rate { display: block; font-size: 11px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.trend-up { color: #15803d; }
+.trend-down { color: #b91c1c; }
+.trend-flat { color: #64748b; }
+
+.perf-rev {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+.rev-上方修正 { border-color: #86efac; background: #f0fdf4; }
+.rev-下方修正 { border-color: #fca5a5; background: #fef2f2; }
+.perf-rev-quote { margin-left: 8px; color: #475569; }
+
+.perf-view {
+  margin-top: 12px;
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.perf-view-title {
+  background: #f1f5f9;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  border-bottom: 1px solid #94a3b8;
+}
+.perf-view-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.perf-view-list li {
+  padding: 9px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.perf-view-list li:last-child { border-bottom: none; }
+.stance {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-right: 8px;
+}
+.stance-強気 { background: #dcfce7; color: #15803d; }
+.stance-慎重 { background: #fee2e2; color: #b91c1c; }
+.stance-中立 { background: #e2e8f0; color: #475569; }
+.stance-不明 { background: #f1f5f9; color: #94a3b8; }
+.perf-view-topic { font-weight: 600; color: #0f172a; margin-right: 6px; }
+.perf-view-quote { color: #475569; }
+
+.perf-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* 標準セット選択ボタン（資料棚でいちばん押してほしい操作） */
+.link-btn-primary {
+  color: #1d4ed8 !important;
+  font-weight: 700;
+}
+
+/* PDFの後追い追加（ドラッグ&ドロップ） */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 16px;
+  margin-bottom: 14px;
+  border: 2px dashed #b6c2d2;
+  border-radius: 10px;
+  background: #fbfcfe;
+  text-align: center;
+  transition: border-color .15s, background .15s;
+}
+.dropzone-over {
+  border-color: #2b6cb0;
+  background: #eef5fd;
+}
+.dropzone-main { font-size: 13px; color: #2d3748; font-weight: 600; }
+.dropzone-sub { font-size: 11px; color: #7a8699; line-height: 1.6; }
+.dropzone-btn {
+  margin-top: 4px;
+  display: inline-block;
+  border: 1px solid #2b6cb0;
+  color: #2b6cb0;
+  background: #fff;
+  border-radius: 7px;
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dropzone-btn:hover { background: #eef5fd; }
