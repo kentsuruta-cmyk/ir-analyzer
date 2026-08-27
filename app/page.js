@@ -1021,10 +1021,16 @@ export default function Home() {
 
       setSavedDir(data.savedDir || "");
 
-      const existingUrls = new Set(documents.map((d) => d.url));
-      const fresh = data.documents.filter((d) => !existingUrls.has(d.url));
+      // 同じURLが既にあっても、サーバーが返した保存先を正として差し替える。
+      // 旧実装はURLが一致したら丸ごと読み飛ばしていたので、会社名を変えた等で
+      // 保存先が変わったとき、資料棚に古いパスが残り続け「他社の資料」と判定されて
+      // 全部非表示になっていた。
+      const incoming = new Map(data.documents.map((d) => [d.url, d]));
+      const kept = documents.map((d) => incoming.get(d.url) || d);
+      const keptUrls = new Set(kept.map((d) => d.url));
+      const fresh = data.documents.filter((d) => !keptUrls.has(d.url));
 
-      const merged = [...documents, ...fresh];
+      const merged = [...kept, ...fresh];
       setDocuments(merged);
       // 旧実装は取り込んだ資料を全部チェック済みにしていたので、要らないものを
       // 手で外す作業が残っていた。標準セットだけを選んだ状態で渡す。
@@ -1043,6 +1049,35 @@ export default function Home() {
 
   function toggle(id) {
     setSelected({ ...selected, [id]: !selected[id] });
+  }
+
+  // ディスクに保存済みのPDFから資料棚を組み直す。
+  // 資料棚はブラウザ側にしか無かったので、保存済みの分析を開いても空のままで
+  // チェックが付けられず、要約・分析に進めなかった。ディスクを正として直す。
+  async function restoreShelf(company, { silent = false } = {}) {
+    if (!company) return 0;
+    try {
+      const res = await fetch(`/api/documents-local?company=${encodeURIComponent(company)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "資料棚を復元できませんでした");
+      const docs = data.documents || [];
+      if (docs.length === 0) {
+        if (!silent) setError(`「${company}」の保存済みPDFが見つかりませんでした`);
+        return 0;
+      }
+      setDocuments(docs);
+      const std = new Set(pickStandardSet(docs).map((d) => d.id));
+      setSelected(() => {
+        const next = {};
+        docs.forEach((d) => (next[d.id] = std.has(d.id)));
+        return next;
+      });
+      if (data.savedDir) setSavedDir(data.savedDir);
+      return docs.length;
+    } catch (e) {
+      if (!silent) setError(e.message);
+      return 0;
+    }
   }
 
   // 手元のPDFを資料棚に足す。
@@ -1598,6 +1633,10 @@ export default function Home() {
     }
     if (!silent) setRestoring(true);
     try {
+      // 資料棚もディスクから組み直す。これをしないと、読み込んだ直後に
+      // チェックを付けられず「資料にチェックを入れてください」で止まってしまう。
+      await restoreShelf(company, { silent: true });
+
       // 業績表は要約・分析とは独立して保存されるので、先に読む。
       // 後ろに置くと「業績表はあるが分析はまだ」のときに早期リターンで復元されない。
       let hasMetrics = false;
@@ -1793,6 +1832,13 @@ export default function Home() {
                 {relabeling ? "整理中..." : "資料名を整える"}
               </button>
               <button
+                onClick={() => restoreShelf(companyName.trim() || currentCompany)}
+                className="link-btn"
+                title="~/IR資料/{会社名}/ に保存済みのPDFから資料棚を組み直します。表示がおかしいときや、別のパソコン・別のブラウザで開いたときに使ってください"
+              >
+                ディスクから復元
+              </button>
+              <button
                 onClick={selectStandardSet}
                 className="link-btn link-btn-primary"
                 title="最新の決算短信・直近の通期短信・決算説明資料・質疑応答・説明会書き起こし・有価証券報告書・中期経営計画だけを選びます"
@@ -1844,11 +1890,26 @@ export default function Home() {
         </div>
 
         {shelfDocs.length === 0 ? (
-          <p className="hint">
-            まだ資料がありません。
-            {hiddenCount > 0 &&
-              `（他社の資料が${hiddenCount}件ありますが、「${currentCompany}」以外のため非表示です）`}
-          </p>
+          <div className="hint">
+            <p>
+              まだ資料がありません。
+              {hiddenCount > 0 &&
+                `（別の保存先を指した資料が${hiddenCount}件ありますが、「${currentCompany}」以外のため非表示です）`}
+            </p>
+            {currentCompany && (
+              <p style={{ marginTop: 8 }}>
+                すでに取り込み済みのはずなのに出てこないときは、ディスクにある
+                PDFから組み直せます。
+                <button
+                  onClick={() => restoreShelf(currentCompany)}
+                  className="link-btn link-btn-primary"
+                  style={{ marginLeft: 6 }}
+                >
+                  📂 ディスクから資料棚を復元
+                </button>
+              </p>
+            )}
+          </div>
         ) : (
           <>
             <ul className="doc-list">
