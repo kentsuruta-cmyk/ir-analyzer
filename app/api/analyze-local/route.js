@@ -3,6 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { getCompanyDir } from "../../../lib/filesave.js";
+import { ALLOWED_DOMAINS, SOURCE_SUMMARY } from "../../../lib/sources.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -50,8 +51,8 @@ const RULES = `あなたは経験豊富な株式投資アナリストです。�
 ## 総括
 （結論から2〜3行。今どういう局面か、投資妙味の有無を端的に）
 
-## 業界内での位置づけ
-（同業・業界の中でこの会社がどこにいるか。外部情報が使える設定のときは、競合や市場動向を出典付きで書く。外部情報が使えない設定のときは「外部情報を使わない設定のため、業界内の比較は行っていません」と1行だけ書く）
+## 業界内での位置づけと市況
+（同業・業界の中でこの会社がどこにいるか、そして今の市況がこの会社にとって追い風か逆風か。外部情報が使える設定のときは、競合・業界動向・マクロの市況を出典付きで書く〔媒体名・時期・可能ならURL〕。古い記事は時期を明記する。外部情報が使えない設定のときは「外部情報を使わない設定のため、業界内の比較と市況は行っていません」と1行だけ書く）
 
 ## ポテンシャル（こうなれば上がる）
 （【所見】上振れにつながる条件・イベント。箇条書き2〜4点。事実サマリーの変化点や見通しと関連づける）
@@ -157,6 +158,8 @@ export async function POST(request) {
     // 二層構造を守る＝「会社自身の事実は要約から／外部の話は出典付きで」。
     const externalBlock = external
       ? `\n\n【この分析ではWeb検索が使えます（外部リサーチ可・上のルール1の例外）】
+- 検索できる先は次の公式・報道系サイトに限定されています: ${SOURCE_SUMMARY}
+  （SNSの投稿・個人ブログ・まとめサイトは検索対象に入りません。これらを出典にしないでください。）
 - 業界動向・競合他社・市況など、事実サマリーに無い情報はWeb検索で調べ、投資判断に織り込んでよい。同業との位置づけ（シェア・成長率・利益率の比較感）や、業界の追い風/逆風を積極的に補ってよい。
 - ただし二層を厳守する：
   ・**会社自身の実績数値・見通し**は、必ず「事実サマリー」からのみ引く（外部の数字で上書きしない）。
@@ -169,8 +172,24 @@ export async function POST(request) {
     const anthropic = new Anthropic({ apiKey });
 
     // 外部情報ON時はWeb検索ツール（サーバー側実行・出典付き）を渡す。
+    // 参照先をドメインで縛る。「Xを見ないでください」と指示するのではなく、
+    // そもそも検索結果に入らないようにする（allowed_domains）。
+    // web_fetch も渡して、見つけた記事の本文まで読めるようにする。
     const tools = external
-      ? [{ type: "web_search_20260209", name: "web_search", max_uses: 6 }]
+      ? [
+          {
+            type: "web_search_20260209",
+            name: "web_search",
+            max_uses: 8,
+            allowed_domains: ALLOWED_DOMAINS,
+          },
+          {
+            type: "web_fetch_20260209",
+            name: "web_fetch",
+            max_uses: 5,
+            allowed_domains: ALLOWED_DOMAINS,
+          },
+        ]
       : undefined;
 
     async function runAnalysis() {

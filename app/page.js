@@ -672,6 +672,121 @@ function PerformanceTable({ data }) {
   );
 }
 
+// ── テクニカル（エントリー位置の足切り）─────────────────────────
+// 「良い会社でも、伸び切ったところでは買わない」ための位置確認。
+// 売買推奨ではなく、移動平均乖離とボリンジャーバンドのσ位置を見せるだけ。
+function yen(n) {
+  if (n == null) return "—";
+  return Math.round(n).toLocaleString();
+}
+function pct(n) {
+  if (n == null) return "—";
+  return `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
+}
+function devClass(n) {
+  if (n == null) return "";
+  if (n >= 25) return "dev-hot";
+  if (n >= 15) return "dev-warm";
+  if (n <= -10) return "dev-cool";
+  return "";
+}
+function sigmaClass(n) {
+  if (n == null) return "";
+  if (n >= 2.5) return "dev-hot";
+  if (n >= 2.0) return "dev-warm";
+  if (n <= -2.0) return "dev-cool";
+  return "";
+}
+
+function TechnicalPanel({ data }) {
+  if (!data?.technical) return null;
+  const { technical: t, name, code, matchedBy } = data;
+  const { weekly: w, monthly: m, judgement: j, range52w: r } = t;
+  const levelCls = j.level === 2 ? "tech-stop" : j.level === 1 ? "tech-warn" : "tech-ok";
+
+  // 週足は13/26週、月足は12/24ヶ月と本数が違うので、期間は行ごとに出す。
+  // ヘッダーに固定で書くと、月足の行に週足の本数が出てしまう。
+  const row = (label, unit, a) => (
+    <tr>
+      <th scope="row" className="tech-rowhead">
+        {label}
+        <span className="tech-rowsub">{a.maShortPeriod}{unit} / {a.maLongPeriod}{unit}</span>
+      </th>
+      <td>{yen(a.price)}</td>
+      <td>{yen(a.maShort)}<span className="tech-cellsub">{a.maShortPeriod}{unit}</span></td>
+      <td className={devClass(a.deviationShortPct)}>{pct(a.deviationShortPct)}</td>
+      <td>{yen(a.maLong)}<span className="tech-cellsub">{a.maLongPeriod}{unit}</span></td>
+      <td className={devClass(a.deviationLongPct)}>{pct(a.deviationLongPct)}</td>
+      <td className={sigmaClass(a.bb?.position)}>
+        {a.bb?.position == null ? "—" : `${a.bb.position > 0 ? "+" : ""}${a.bb.position.toFixed(2)}σ`}
+      </td>
+      <td className="tech-band">
+        {a.bb ? `${yen(a.bb.sigma2[0])} 〜 ${yen(a.bb.sigma2[1])}` : "—"}
+      </td>
+    </tr>
+  );
+
+  return (
+    <div className="tech">
+      <div className="perf-head">
+        <strong className="perf-title">📉 いま買う位置か（週足・月足）</strong>
+        <span className="tech-meta">
+          {name}（{code}）／終値 {yen(t.price)}円 @{t.asOf}
+          {matchedBy ? `／銘柄特定: ${matchedBy}` : ""}
+        </span>
+      </div>
+
+      <div className={`tech-verdict ${levelCls}`}>
+        <div className="tech-verdict-label">{j.verdict}</div>
+        <ul className="tech-reasons">
+          {j.reasons.map((x, i) => <li key={i}>{x}</li>)}
+        </ul>
+      </div>
+
+      <div className="perf-scroll">
+        <table className="perf-table tech-table">
+          <thead>
+            <tr>
+              <th>足</th>
+              <th>終値</th>
+              <th>短期の移動平均</th>
+              <th>乖離</th>
+              <th>長期の移動平均</th>
+              <th>乖離</th>
+              <th>BB位置</th>
+              <th>±2σの範囲</th>
+            </tr>
+          </thead>
+          <tbody>
+            {row("週足", "週", w)}
+            {row("月足", "ヶ月", m)}
+          </tbody>
+        </table>
+      </div>
+
+      {j.pullbackTargets?.length > 0 && j.level > 0 && (
+        <div className="tech-targets">
+          <span className="tech-targets-label">押し目の目安</span>
+          {j.pullbackTargets.map((x, i) => (
+            <span key={i} className="tech-target">
+              {x.label} <b>{yen(x.value)}円</b>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="tech-range">
+        直近1年のレンジ: {yen(r.low)} 〜 {yen(r.high)}円
+        （現在はレンジの{Math.round(((t.price - r.low) / (r.high - r.low)) * 100)}%の位置）
+      </div>
+      <p className="tech-note">
+        株価データ: J-Quants（分割調整後の終値）。移動平均とボリンジャーバンド（20本・±2σ）から
+        位置を機械的に判定しているだけで、売買の推奨ではありません。
+      </p>
+    </div>
+  );
+}
+
 export default function Home() {
   const [urls, setUrls] = useState(["", "", "", "", "", ""]);  const [documents, setDocuments] = useState([]);
   const [selected, setSelected] = useState({});
@@ -690,6 +805,10 @@ export default function Home() {
   const [summaries, setSummaries] = useState([]);
   const [metrics, setMetrics] = useState(null);
   const [metricsBusy, setMetricsBusy] = useState(false);
+  const [technical, setTechnical] = useState(null);
+  const [technicalBusy, setTechnicalBusy] = useState(false);
+  const [technicalError, setTechnicalError] = useState("");
+  const [codeChoices, setCodeChoices] = useState([]);
   const [analysis, setAnalysis] = useState("");
   // 表示中の分析が「保存済みファイルから復元したもの」のときの保存時刻
   const [savedAt, setSavedAt] = useState("");
@@ -1000,6 +1119,9 @@ export default function Home() {
     setSelected({});
     setSummaries([]);
     setMetrics(null);
+    setTechnical(null);
+    setTechnicalError("");
+    setCodeChoices([]);
     setAnalysis("");
     setMessages([]);
     setQuestion("");
@@ -1099,6 +1221,34 @@ export default function Home() {
     }
   }
 
+  // 株価の位置（週足・月足）を取りに行く。分析とは独立して失敗してよい。
+  async function fetchTechnical(companyArg, tickerArg) {
+    const company = (companyArg || companyName || "").trim();
+    const ticker = (tickerArg ?? tickerCode ?? "").trim();
+    if (!company && !ticker) return;
+    setTechnicalBusy(true);
+    setTechnicalError("");
+    setCodeChoices([]);
+    try {
+      const qs = new URLSearchParams({ company, ticker });
+      const res = await fetch(`/api/technical-local?${qs}`);
+      const data = await res.json();
+      if (res.status === 409 && data.ambiguous) {
+        // 同名候補が複数。勝手に選ばず画面で選ばせる
+        setCodeChoices(data.ambiguous);
+        setTechnical(null);
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || "株価データを取得できませんでした");
+      setTechnical(data);
+    } catch (e) {
+      setTechnical(null);
+      setTechnicalError(e.message);
+    } finally {
+      setTechnicalBusy(false);
+    }
+  }
+
   async function handleAnalyze() {
     const company =
       companyName.trim() || deriveCompanyName(activeDocs) || deriveCompanyName(documents);
@@ -1133,6 +1283,7 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || "分析に失敗しました");
       setAnalysis(data.analysis || "");
       setSavedAt("");
+      fetchTechnical(company, tickerCode);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -1733,7 +1884,7 @@ export default function Home() {
             checked={useExternal}
             onChange={(e) => setUseExternal(e.target.checked)}
           />
-          業界リサーチも入れる（競合・業界をWeb検索し、出典付きで分析に反映。要約は一次情報のまま。少し遅く・検索コスト）
+          業界・市況リサーチも入れる（ブルームバーグ／ロイター／日経・証券会社のリサーチ・適時開示・東洋経済/四季報 に限定してWeb検索し、出典付きで分析に反映。SNSや個人ブログは検索対象に入りません。要約は一次情報のまま。少し遅く・検索コスト）
         </label>
 
         <div className="presets" style={{ marginBottom: 10 }}>
@@ -1795,6 +1946,42 @@ export default function Home() {
             事実サマリーができました。続けて<strong>投資判断</strong>を出すには、上の
             「② 選択した資料をまとめて要約 → 分析」（または「1ステップずつ」の分析だけ）を押してください。
           </p>
+        )}
+
+        {/* エントリー位置（週足・月足）。分析のあとに自動で取りに行くが、単体でも押せる */}
+        <div className="tech-actions">
+          <button
+            type="button"
+            onClick={() => fetchTechnical()}
+            disabled={technicalBusy}
+            className="preset-btn"
+            title="週足・月足の移動平均乖離とボリンジャーバンドから、いま買う位置かを確認します"
+          >
+            {technicalBusy ? "株価を確認中..." : "📉 いま買う位置か確認する"}
+          </button>
+        </div>
+        {technicalError && <div className="error">{technicalError}</div>}
+        {codeChoices.length > 0 && (
+          <div className="tech-choices">
+            <span>同名の候補が複数あります。銘柄を選んでください：</span>
+            {codeChoices.map((c) => (
+              <button
+                key={c.code}
+                type="button"
+                className="preset-btn"
+                onClick={() => { setTickerCode(c.code); fetchTechnical(companyName, c.code); }}
+              >
+                {c.name}（{c.code}）
+              </button>
+            ))}
+          </div>
+        )}
+        {technical && (
+          <div className="chat">
+            <div className="msg-ai">
+              <TechnicalPanel data={technical} />
+            </div>
+          </div>
         )}
 
         {/* 投資判断（ポテンシャル・リスク） */}

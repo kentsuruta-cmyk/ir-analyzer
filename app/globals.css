@@ -857,3 +857,46 @@ body {
   cursor: pointer;
 }
 .dropzone-btn:hover { background: #eef5fd; }
+
+/* ── テクニカル（エントリー位置）───────────────────────────── */
+.tech { margin: 14px 0 18px; }
+.tech-meta { font-size: 11px; color: #64748b; }
+.tech-actions { margin: 10px 0; }
+.tech-choices {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 12px; color: #475569; margin-bottom: 10px;
+}
+.tech-verdict {
+  border: 2px solid #cbd5e1;
+  border-left-width: 8px;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: #f8fafc;
+}
+.tech-ok   { border-color: #86efac; background: #f0fdf4; }
+.tech-warn { border-color: #fcd34d; background: #fffbeb; }
+.tech-stop { border-color: #fca5a5; background: #fef2f2; }
+.tech-verdict-label { font-weight: 700; font-size: 14px; color: #0f172a; }
+.tech-reasons { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: #475569; line-height: 1.8; }
+.tech-table th, .tech-table td { text-align: center; }
+.tech-rowhead {
+  text-align: left !important;
+  background: #f8fafc; font-weight: 700; color: #0f172a;
+}
+.tech-band { font-size: 11px; color: #64748b; }
+.dev-hot  { color: #b91c1c; font-weight: 700; background: #fef2f2; }
+.dev-warm { color: #b45309; font-weight: 700; background: #fffbeb; }
+.dev-cool { color: #1d4ed8; }
+.tech-targets {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  margin-top: 10px; font-size: 12px; color: #475569;
+}
+.tech-targets-label { font-weight: 700; color: #0f172a; }
+.tech-target {
+  border: 1px solid #cbd5e1; border-radius: 6px; padding: 3px 9px; background: #fff;
+}
+.tech-range { margin-top: 8px; font-size: 12px; color: #475569; }
+.tech-note { margin-top: 6px; font-size: 11px; color: #94a3b8; line-height: 1.6; }
+.tech-rowsub { display: block; font-size: 10px; color: #94a3b8; font-weight: 400; margin-top: 2px; }
+.tech-cellsub { display: block; font-size: 10px; color: #94a3b8; margin-top: 2px; }
