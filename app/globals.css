@@ -900,3 +900,5 @@ body {
 .tech-note { margin-top: 6px; font-size: 11px; color: #94a3b8; line-height: 1.6; }
 .tech-rowsub { display: block; font-size: 10px; color: #94a3b8; font-weight: 400; margin-top: 2px; }
 .tech-cellsub { display: block; font-size: 10px; color: #94a3b8; margin-top: 2px; }
+.perf-badge-sub { display: block; font-size: 9px; font-weight: 400; color: #64748b; margin-top: 2px; }
+.trend-from { display: block; font-size: 9px; color: #94a3b8; margin-top: 3px; white-space: nowrap; }

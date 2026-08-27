@@ -528,33 +528,88 @@ function fmtSigned(n) {
   return `${sign}${Math.abs(n).toFixed(1)}%`;
 }
 
-// 直近の実績同士を比べて増減率を出す（会社予想は実績と混ぜない）
+// 実績同士を比べて増減率を出す（会社予想は実績と混ぜない）
 function changeRate(curr, prev) {
   if (curr == null || prev == null || prev === 0) return null;
   return ((curr - prev) / Math.abs(prev)) * 100;
 }
 
-// 実績が伸びているかを矢印1文字で表す。Kenがいちばん見たい部分。
-function trendOf(cells, periods) {
-  const actuals = periods
-    .filter((p) => !p.is_forecast)
-    .map((p) => cells.find((c) => c.period_label === p.label))
-    .filter((c) => c && c.numeric_million_yen != null);
-  if (actuals.length < 2) return null;
-  const last = actuals[actuals.length - 1].numeric_million_yen;
-  const prev = actuals[actuals.length - 2].numeric_million_yen;
-  const r = changeRate(last, prev);
-  if (r == null) return null;
-  if (r >= 5) return { mark: "↗", cls: "trend-up", rate: r };
-  if (r <= -5) return { mark: "↘", cls: "trend-down", rate: r };
-  return { mark: "→", cls: "trend-flat", rate: r };
+// 「2027年3月期」から年の数字だけ取り出す。年度表記が来たときの保険も入れる。
+function fyNumber(fiscalYear) {
+  const m = (fiscalYear || "").match(/((?:19|20)\d{2})\s*年\s*\d{1,2}\s*月期/);
+  if (m) return Number(m[1]);
+  const n = (fiscalYear || "").match(/((?:19|20)\d{2})\s*年度/);
+  if (n) return Number(n[1]) + 1;   // 2026年度 ≒ 2027年3月期
+  return null;
+}
+
+// 保存済みの古い業績データには fiscal_year / quarter_label が無い。
+// ラベル（例「2026年8月期3Q累計」「2027年3月期(会社予想)」）から補完して、
+// 作り直さなくても前年同期比が出るようにする。
+function fillPeriodFields(p) {
+  if (p.fiscal_year && p.quarter_label) return p;
+  const label = p.label || "";
+  const fyMatch = label.match(/((?:19|20)\d{2}\s*年\s*\d{1,2}\s*月期)/);
+  const nendo = label.match(/((?:19|20)\d{2})\s*年度/);
+  const fiscal_year = p.fiscal_year || (fyMatch ? fyMatch[1].replace(/\s/g, "") : nendo ? `${Number(nendo[1]) + 1}年3月期` : "");
+
+  let quarter_label = p.quarter_label;
+  if (!quarter_label) {
+    const q = label.match(/(?:第\s*([1-4])\s*四半期|([1-4])\s*Q)/i);
+    quarter_label = q ? `${q[1] || q[2]}Q` : "通期";
+  }
+  const is_cumulative =
+    p.is_cumulative != null ? p.is_cumulative : quarter_label === "通期" || /累計/.test(label);
+
+  return { ...p, fiscal_year, quarter_label, is_cumulative };
+}
+
+// 前年の同じ四半期を探す。四半期と通期が混ざった表でも、
+// 「1Qは前年の1Q」「通期は前年の通期」と正しく突き合わせるための関数。
+// 旧実装はリスト上でひとつ前の実績と比べていたので、
+// 「2027年3月期1Q」を「2026年3月期通期」と比べてしまう並びが起きえた。
+function findSameQuarterPrevYear(periods, p) {
+  const y = fyNumber(p.fiscal_year);
+  if (y == null || !p.quarter_label) return null;
+  return (
+    periods.find(
+      (q) =>
+        !q.is_forecast &&
+        q.quarter_label === p.quarter_label &&
+        q.is_cumulative === p.is_cumulative &&
+        fyNumber(q.fiscal_year) === y - 1
+    ) || null
+  );
+}
+
+// 最新の実績を「前年の同じ四半期」と比べて、伸びているかを矢印1文字で表す。
+// Kenがいちばん見たい部分。前年同期が見つからないときは比較しない（無理に隣と比べない）。
+function yoyOf(cells, periods) {
+  const actuals = periods.filter((p) => !p.is_forecast);
+  for (let i = actuals.length - 1; i >= 0; i--) {
+    const p = actuals[i];
+    const cur = cells.find((c) => c.period_label === p.label);
+    if (!cur || cur.numeric_million_yen == null) continue;
+    const prevPeriod = findSameQuarterPrevYear(periods, p);
+    if (!prevPeriod) continue;
+    const prev = cells.find((c) => c.period_label === prevPeriod.label);
+    if (!prev || prev.numeric_million_yen == null) continue;
+    const r = changeRate(cur.numeric_million_yen, prev.numeric_million_yen);
+    if (r == null) continue;
+    const mark = r >= 5 ? "↗" : r <= -5 ? "↘" : "→";
+    const cls = r >= 5 ? "trend-up" : r <= -5 ? "trend-down" : "trend-flat";
+    return { mark, cls, rate: r, from: prevPeriod.label, to: p.label };
+  }
+  return null;
 }
 
 function PerformanceTable({ data }) {
   const [showSources, setShowSources] = useState(false);
   if (!data || !data.periods?.length || !data.rows?.length) return null;
 
-  const { periods, rows, company_view: view = [], forecast_revision: rev, notes = [] } = data;
+  const { rows, company_view: view = [], forecast_revision: rev, notes = [] } = data;
+  // 古い保存データでも前年同期比が出るように、足りない項目をラベルから補う
+  const periods = data.periods.map(fillPeriodFields);
 
   return (
     <div className="perf">
@@ -581,12 +636,12 @@ function PerformanceTable({ data }) {
                   {p.is_forecast && <span className="perf-badge">会社予想</span>}
                 </th>
               ))}
-              <th className="perf-trend-head">直近の増減</th>
+              <th className="perf-trend-head">前年同期比<span className="perf-badge-sub">最新実績</span></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
-              const t = trendOf(row.cells, periods);
+              const t = yoyOf(row.cells, periods);
               return (
                 <tr key={row.metric}>
                   <th scope="row" className="perf-metric">{row.metric}</th>
@@ -594,10 +649,11 @@ function PerformanceTable({ data }) {
                     const c = row.cells.find((x) => x.period_label === p.label);
                     if (!c) return <td key={p.label} className="perf-empty">—</td>;
 
-                    // 前の「実績」期と比べて色を付ける（予想は色を付けない）
+                    // 前年の同じ四半期と比べて色を付ける（予想は色を付けない）。
+                    // 隣の列と比べると、1Qと通期のように性質の違う期を比べてしまう。
                     let rate = null;
                     if (!p.is_forecast) {
-                      const prevPeriod = [...periods.slice(0, pi)].reverse().find((q) => !q.is_forecast);
+                      const prevPeriod = findSameQuarterPrevYear(periods, p);
                       const prevCell = prevPeriod
                         ? row.cells.find((x) => x.period_label === prevPeriod.label)
                         : null;
@@ -614,22 +670,26 @@ function PerformanceTable({ data }) {
                         <span className="perf-val">{c.display}</span>
                         {c.yoy_text && <span className="perf-yoy">{c.yoy_text}</span>}
                         {!c.yoy_text && rate != null && (
-                          <span className="perf-yoy perf-calc" title="前の期との比較（この画面で計算）">
-                            {fmtSigned(rate)}
+                          <span className="perf-yoy perf-calc" title="前年同期との比較（原文に記載が無いため、この画面で計算した値）">
+                            前年同期 {fmtSigned(rate)}
                           </span>
                         )}
                         {showSources && c.source && <span className="perf-src">{c.source}</span>}
                       </td>
                     );
                   })}
-                  <td className={`perf-trend ${t ? t.cls : ""}`}>
+                  <td
+                    className={`perf-trend ${t ? t.cls : ""}`}
+                    title={t ? `${t.from} → ${t.to}` : "前年の同じ四半期が資料に無いため比較できません"}
+                  >
                     {t ? (
                       <>
                         <span className="trend-mark">{t.mark}</span>
                         <span className="trend-rate">{fmtSigned(t.rate)}</span>
+                        <span className="trend-from">{t.to} vs 前年</span>
                       </>
                     ) : (
-                      "—"
+                      <span style={{ color: "#cbd5e1" }}>—</span>
                     )}
                   </td>
                 </tr>
