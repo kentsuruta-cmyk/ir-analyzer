@@ -7,6 +7,32 @@ export const maxDuration = 120;
 const MODEL = "claude-haiku-4-5";
 const CHARS = 1500;
 
+// 判定結果の表記ゆれを、資料棚・標準セットが使う正式名称に寄せる。
+// 「説明会書きおこし」「決算補足説明資料」のような揺れがあると、
+// 標準セットの照合が外れて選ばれなくなる。
+const DOC_TYPE_ALIASES = [
+  // 株主通信（「第64期 業績のご報告」等）は決算説明資料と紛らわしいが別物。
+  // 決算説明資料として拾うと、本物の補足説明資料を押しのけてしまう。
+  [/株主通信|業績のご報告|事業報告書|アニュアルレポート|統合報告書/, "株主通信"],
+  [/質疑|Q\s*&\s*A|Ｑ＆Ａ|想定問答|議事録/i, "質疑応答"],
+  [/書き?起こし|書きおこし|文字起こし|トランスクリプト|transcript/i, "説明会書き起こし"],
+  [/中期経営|中期計画|中計|mid[-\s]?term/i, "中期経営計画"],
+  [/有価証券報告書/, "有価証券報告書"],
+  [/四半期報告書/, "四半期報告書"],
+  [/半期報告書/, "半期報告書"],
+  [/短信/, "決算短信"],
+  [/決算説明|説明資料|決算補足|補足説明|説明会資料/, "決算説明資料"],
+];
+
+function normalizeDocType(raw) {
+  const t = (raw || "").trim();
+  if (!t) return "";
+  for (const [re, canonical] of DOC_TYPE_ALIASES) {
+    if (re.test(t)) return canonical;
+  }
+  return t;
+}
+
 function buildPrompt(items) {
   return (
     "以下は複数のIR資料の冒頭テキストです。各資料について、会社名・決算期・四半期・資料種別を判定してください。判断できない項目は空文字にしてください。\n\n" +
@@ -74,7 +100,7 @@ export async function POST(request) {
                     docType: {
                       type: "string",
                       description:
-                        "決算短信 / 決算説明資料 / 有価証券報告書 / 四半期報告書 / 決算補足資料 / 質疑応答 / 適時開示 / その他 のいずれか",
+                        "決算短信 / 決算説明資料 / 質疑応答 / 説明会書き起こし / 中期経営計画 / 有価証券報告書 / 四半期報告書 / 半期報告書 / 株主通信 / 適時開示 / その他 のいずれか。決算補足説明資料・決算補足資料・決算説明会資料はすべて「決算説明資料」にすること。説明会の書き起こし・文字起こしは「説明会書き起こし」にすること。「第○期 業績のご報告」「株主通信」「事業報告書」は投資家向けの読み物なので「株主通信」にすること（決算説明資料ではない）。",
                     },
                   },
                   required: ["id", "fiscalPeriod", "date", "quarter", "docType"],
@@ -101,9 +127,10 @@ export async function POST(request) {
       const fiscalYear = (r.fiscalPeriod || "").trim();
       const when = fiscalYear || (r.date || "").trim();
       const q = r.quarter && r.quarter !== "不明" ? r.quarter.trim() : "";
-      const parts = [when, q, (r.docType || "").trim()].filter(Boolean);
+      const docType = normalizeDocType(r.docType);
+      const parts = [when, q, docType].filter(Boolean);
       if (parts.length) labels[r.id] = parts.join(" ");
-      fields[r.id] = { docType: (r.docType || "").trim(), fiscalYear, quarter: q };
+      fields[r.id] = { docType, fiscalYear, quarter: q };
     }
 
     return Response.json({ labels, fields });

@@ -128,6 +128,19 @@ function latestOfType(docs, type) {
 // 1件だけだと業績の推移が追えないので、四半期を並べて取る。
 const TANSHIN_QUARTERS = 4;
 
+// 指定した会社の資料だけを対象に標準セットを選ぶ。
+// 資料棚は会社をまたいで貯まるので、全体で選ぶと別会社の資料が選ばれてしまう。
+function standardSelectionFor(docs, company) {
+  const mine = company ? docs.filter((d) => {
+    const c = companyOfDoc(d);
+    return !c || c === company;
+  }) : docs;
+  const std = new Set(pickStandardSet(mine).map((d) => d.id));
+  const next = {};
+  docs.forEach((d) => (next[d.id] = std.has(d.id)));
+  return next;
+}
+
 function pickStandardSet(docs) {
   const picked = [];
   const push = (d) => {
@@ -907,9 +920,11 @@ export default function Home() {
       if (saved) {
         const parsed = JSON.parse(saved);
         setDocuments(parsed);
-        const init = {};
-        parsed.forEach((d) => (init[d.id] = true));
-        setSelected(init);
+        // 旧実装はここで保存済みの資料を全部チェック済みにしていたため、
+        // 画面を開き直すたびに要らないものを手で外す作業が発生していた。
+        // 標準セットだけを選んだ状態で復元する。
+        const savedCo = localStorage.getItem(COMPANY_KEY) || "";
+        setSelected(standardSelectionFor(parsed, savedCo));
       }
       const savedProfile = localStorage.getItem(PROFILE_KEY);
       if (savedProfile != null) setAnalysisProfile(savedProfile);
@@ -1035,16 +1050,30 @@ export default function Home() {
       const keptUrls = new Set(kept.map((d) => d.url));
       const fresh = data.documents.filter((d) => !keptUrls.has(d.url));
 
-      const merged = [...kept, ...fresh];
+      let merged = [...kept, ...fresh];
+
+      // IRニュース一覧のようなページでは、リンクの文字列が繋がって取れてしまい、
+      // 別の資料が同じ種別・同じ期に見えることがある（補足説明資料が決算短信に
+      // 化けるなど）。そのままだと標準セットが誤ったものを選ぶので、
+      // 同じ「種別＋決算期＋四半期」が重複しているか種別不明があるときは、
+      // 中身を読んで名前と種別を直してから選び直す。
+      const key = (d) => `${d.docType}|${d.fiscalYear}|${d.quarter}`;
+      const counts = merged.reduce((m, d) => m.set(key(d), (m.get(key(d)) || 0) + 1), new Map());
+      const needsRelabel =
+        merged.some((d) => d.docType === "不明" || d.fiscalYear === "不明") ||
+        [...counts.values()].some((n) => n > 1);
+
+      if (needsRelabel) {
+        const fixed = await relabelDocs(merged);
+        if (fixed) merged = fixed;
+      }
+
       setDocuments(merged);
-      // 旧実装は取り込んだ資料を全部チェック済みにしていたので、要らないものを
-      // 手で外す作業が残っていた。標準セットだけを選んだ状態で渡す。
-      const std = new Set(pickStandardSet(merged).map((d) => d.id));
-      setSelected(() => {
-        const next = {};
-        merged.forEach((d) => (next[d.id] = std.has(d.id)));
-        return next;
-      });
+      // 標準セットだけを選んだ状態で渡す。資料棚は会社をまたいで貯まるので、
+      // いま取り込んだ会社の資料だけを対象に選ぶ（全体で選ぶと別会社の
+      // 決算短信のほうが新しくて、そちらが選ばれてしまう）。
+      const company = companyName.trim() || deriveCompanyName(merged);
+      setSelected(standardSelectionFor(merged, company));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -1071,12 +1100,7 @@ export default function Home() {
         return 0;
       }
       setDocuments(docs);
-      const std = new Set(pickStandardSet(docs).map((d) => d.id));
-      setSelected(() => {
-        const next = {};
-        docs.forEach((d) => (next[d.id] = std.has(d.id)));
-        return next;
-      });
+      setSelected(standardSelectionFor(docs, company));
       if (data.savedDir) setSavedDir(data.savedDir);
       return docs.length;
     } catch (e) {
@@ -1134,12 +1158,7 @@ export default function Home() {
 
   // 手で触ったあとに標準セットへ戻すためのボタン用
   function selectStandardSet() {
-    const std = new Set(pickStandardSet(documents).map((d) => d.id));
-    setSelected(() => {
-      const next = {};
-      documents.forEach((d) => (next[d.id] = std.has(d.id)));
-      return next;
-    });
+    setSelected(standardSelectionFor(documents, companyName.trim()));
   }
 
   function setAllSelected(value) {
@@ -1150,11 +1169,12 @@ export default function Home() {
     });
   }
 
-  async function handleRelabel() {
-    const targets = shelfDocs.filter((d) => d.text);
-    if (targets.length === 0) return;
+  // PDFの冒頭を読んで資料名と種別を直し、直した配列を返す。
+  // 取り込み直後の自動実行と、資料棚のボタンの両方から使う。
+  async function relabelDocs(docs) {
+    const targets = docs.filter((d) => d.text);
+    if (targets.length === 0) return null;
     setRelabeling(true);
-    setError("");
     try {
       const res = await fetch("/api/relabel-local", {
         method: "POST",
@@ -1165,24 +1185,32 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || "資料名の整理に失敗しました");
       const labels = data.labels || {};
       const fields = data.fields || {};
-      setDocuments((docs) =>
-        docs.map((d) => {
-          if (!labels[d.id] && !fields[d.id]) return d;
-          const f = fields[d.id] || {};
-          return {
-            ...d,
-            label: labels[d.id] || d.label,
-            docType: f.docType || d.docType,
-            fiscalYear: f.fiscalYear || d.fiscalYear,
-            quarter: f.quarter || d.quarter,
-          };
-        })
-      );
+      return docs.map((d) => {
+        if (!labels[d.id] && !fields[d.id]) return d;
+        const f = fields[d.id] || {};
+        return {
+          ...d,
+          label: labels[d.id] || d.label,
+          docType: f.docType || d.docType,
+          fiscalYear: f.fiscalYear || d.fiscalYear,
+          quarter: f.quarter || d.quarter,
+        };
+      });
     } catch (e) {
       setError(e.message);
+      return null;
     } finally {
       setRelabeling(false);
     }
+  }
+
+  async function handleRelabel() {
+    const fixed = await relabelDocs(shelfDocs);
+    if (!fixed) return;
+    const byId = new Map(fixed.map((d) => [d.id, d]));
+    setDocuments((docs) => docs.map((d) => byId.get(d.id) || d));
+    // 種別が直ったら標準セットも選び直す
+    setSelected(standardSelectionFor(fixed, companyName.trim()));
   }
 
   function removeDoc(id) {
