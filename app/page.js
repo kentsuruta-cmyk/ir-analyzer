@@ -124,26 +124,29 @@ function latestOfType(docs, type) {
     .sort((a, b) => b.rank - a.rank || a.i - b.i)[0].d;
 }
 
+// 直近1年分の決算短信＝直近4四半期ぶん。
+// 1件だけだと業績の推移が追えないので、四半期を並べて取る。
+const TANSHIN_QUARTERS = 4;
+
 function pickStandardSet(docs) {
   const picked = [];
   const push = (d) => {
     if (d && !picked.some((p) => p.url === d.url)) picked.push(d);
   };
 
-  // 1. 最新の決算短信
-  const latestTanshin = latestOfType(docs, "決算短信");
-  push(latestTanshin);
+  // 1. 直近1年分の決算短信（直近4四半期）
+  const tanshin = docs
+    .filter((d) => d.savedPath && isType(d, "決算短信"))
+    .map((d, i) => ({ d, i, rank: periodRank(d.fiscalYear, d.quarter) }))
+    .sort((a, b) => b.rank - a.rank || a.i - b.i);
+  tanshin.slice(0, TANSHIN_QUARTERS).forEach((x) => push(x.d));
 
-  // 2. 直近の「通期」決算短信。最新が四半期なら、前期の着地を押さえるために足す。
-  if (latestTanshin && latestTanshin.quarter !== "通期") {
-    const fullYear = docs
-      .filter((d) => d.savedPath && isType(d, "決算短信") && d.quarter === "通期")
-      .map((d, i) => ({ d, i, rank: periodRank(d.fiscalYear, d.quarter) }))
-      .sort((a, b) => b.rank - a.rank || a.i - b.i)[0];
-    push(fullYear?.d);
+  // 2. 直近1年分に通期が入っていなければ、前期の着地として最新の通期を足す
+  if (!picked.some((d) => isType(d, "決算短信") && d.quarter === "通期")) {
+    push(tanshin.find((x) => x.d.quarter === "通期")?.d);
   }
 
-  // 3〜7
+  // 3〜7. それぞれ最新の1件
   for (const type of ["決算説明資料", "質疑応答", "説明会書き起こし", "有価証券報告書", "中期経営計画"]) {
     push(latestOfType(docs, type));
   }
@@ -857,7 +860,9 @@ export default function Home() {
   const [companyName, setCompanyName] = useState("");
   const [tickerCode, setTickerCode] = useState("");
   // 取り込む決算期の下限（西暦）。空なら制限なし。古い資料で枠が埋まるのを防ぐ。
-  const [minFiscalYear, setMinFiscalYear] = useState(String(new Date().getFullYear() - 3));
+  // 既定は1年前まで。標準セット（直近1年分の短信＋最新の有報・説明資料・
+  // 文字起こし・質疑応答）に必要な範囲。もっと遡りたいときだけ手で下げる。
+  const [minFiscalYear, setMinFiscalYear] = useState(String(new Date().getFullYear() - 1));
   const [collectingLocal, setCollectingLocal] = useState(false);
   const [savedDir, setSavedDir] = useState("");
 
@@ -1243,6 +1248,13 @@ export default function Home() {
       })
     : documents;
   const hiddenCount = documents.length - shelfDocs.length;
+
+  // どの資料が標準セットかを印で示す。既定でこれだけが選ばれているので、
+  // 「自分でレ点を管理する画面」に見えないようにするため。
+  const standardIds = useMemo(
+    () => new Set(pickStandardSet(shelfDocs).map((d) => d.id)),
+    [shelfDocs]
+  );
 
   const activeDocs = shelfDocs.filter((d) => selected[d.id]);
   const totalChars = activeDocs.reduce((sum, d) => sum + d.chars, 0);
@@ -1889,6 +1901,14 @@ export default function Home() {
           )}
         </div>
 
+        {shelfDocs.length > 0 && (
+          <p className="hint" style={{ marginBottom: 10 }}>
+            ★ 標準セット（{standardIds.size}件）に最初からチェックが入っています。
+            そのまま下の「② 選択した資料をまとめて要約 → 分析」を押してください。
+            <b>レ点を触る必要はありません。</b>
+          </p>
+        )}
+
         {shelfDocs.length === 0 ? (
           <div className="hint">
             <p>
@@ -1922,6 +1942,11 @@ export default function Home() {
                       onChange={() => toggle(doc.id)}
                     />
                     <span className="doc-name">{doc.label}</span>
+                    {standardIds.has(doc.id) && (
+                      <span className="std-badge" title="標準セット：直近1年分の決算短信・最新の決算説明資料・質疑応答・説明会書き起こし・有価証券報告書・中期経営計画">
+                        ★ 標準セット
+                      </span>
+                    )}
                   </label>
                   <span className="doc-meta">
                     {doc.pages}頁 / {doc.chars.toLocaleString()}字

@@ -902,3 +902,17 @@ body {
 .tech-cellsub { display: block; font-size: 10px; color: #94a3b8; margin-top: 2px; }
 .perf-badge-sub { display: block; font-size: 9px; font-weight: 400; color: #64748b; margin-top: 2px; }
 .trend-from { display: block; font-size: 9px; color: #94a3b8; margin-top: 3px; white-space: nowrap; }
+
+/* 標準セットの印（既定で選ばれている資料であることを一目で示す） */
+.std-badge {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
