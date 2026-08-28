@@ -74,6 +74,15 @@ function fiscalYearNumber(fiscalYear) {
   return other ? Number(other[1]) : null;
 }
 
+// 決算期が「第64期」のように西暦を持たない資料でも、ラベルに載っている
+// 開示日（2026.06.24 / 2026年6月24日 など）から年を拾えることが多い。
+// これが無いと、関連ページまで辿るようになってから古い四半期報告書が
+// 年の足切りをすり抜けて大量に入ってしまう。
+function labelYear(label) {
+  const m = (label || "").match(/((?:19|20)\d{2})[.\-/年]\s*\d{1,2}[.\-/月]/);
+  return m ? Number(m[1]) : null;
+}
+
 function selectDocuments(candidates, limit, minFiscalYear) {
   const groups = new Map();
   const skippedOld = [];
@@ -82,7 +91,8 @@ function selectDocuments(candidates, limit, minFiscalYear) {
 
     // 古い資料の足切り。決算期を読み取れないものは判断できないので残す
     // （読み取れないものを落とすと、決算期が書かれていない質疑応答などを取りこぼす）。
-    const fyNum = fiscalYearNumber(fiscalYear);
+    // ただしラベルに開示日があるなら、それを決算期の代わりに使う。
+    const fyNum = fiscalYearNumber(fiscalYear) ?? labelYear(c.label);
     if (minFiscalYear && fyNum !== null && fyNum < minFiscalYear) {
       skippedOld.push(c);
       return;
@@ -215,12 +225,14 @@ export async function POST(request) {
         const page = await context.newPage();
         page.setDefaultTimeout(15000);
         try {
-          const { links, interactionsPerformed, timedOut } = await crawlForPdfLinks(page, target);
+          const { links, interactionsPerformed, subPagesVisited, timedOut } = await crawlForPdfLinks(page, target);
           if (links.length === 0) {
             notes.push(`${target} … PDFリンクが見つかりませんでした`);
           } else {
             notes.push(
-              `${target} … ${links.length}件のPDFを発見（操作${interactionsPerformed}回${timedOut ? "・時間切れで打ち切り" : ""}）`
+              `${target} … ${links.length}件のPDFを発見（操作${interactionsPerformed}回${
+                subPagesVisited ? `・関連ページ${subPagesVisited}件も確認` : ""
+              }${timedOut ? "・時間切れで打ち切り" : ""}）`
             );
             // ここでは上限で切らない。1ページ目だけで枠を使い切ると、
             // 2ページ目以降の資料が1件も入らなくなるため。
