@@ -153,6 +153,7 @@ export async function POST(request) {
       urls,
       minFiscalYear: minFyRaw,
       confirmDifferentSite,
+      onlyStandardTypes = true,
     } = await request.json();
 
     // 「◯年3月期より前は取り込まない」。
@@ -286,7 +287,7 @@ export async function POST(request) {
     allLinks = [...directLinks, ...picked];
 
     // 1. まずダウンロード＋ラベルベースの決定的分類（LLM不要）
-    const items = [];
+    let items = [];
     for (const link of allLinks) {
       try {
         // 2回目以降：同じURLを取り込み済みなら、再ダウンロードせずローカルのPDFを読む。
@@ -302,7 +303,23 @@ export async function POST(request) {
         const { text, pages } = await extractPdfText(buffer);
         // テキストが取れない画像PDF（有価証券報告書のスキャン等）でも、
         // ファイル収集が主目的なので保存はする（NotebookLM等は画像PDFも読める）。
-        const heuristic = classifyFromLabel(link.label);
+        // 種別の判定はPDF自身の中身を第一の根拠にする。
+        // ページのリンク文字は、サイトの作りによっては全リンクが同じ文言に化ける
+        // （じげんのIRニュース一覧では48件すべてが「質疑応答」と判定された）。
+        // 表紙に「2027年3月期 第1四半期 決算短信」と書いてあるPDF自身のほうが確かなので、
+        // 本文から判定できたらそちらを優先し、読めないときだけラベルに頼る。
+        const fromLabel = classifyFromLabel(link.label);
+        const fromText = text ? classifyFromLabel((text || "").slice(0, CLASSIFY_TEXT_CHARS)) : null;
+        const heuristic =
+          fromText && fromText.docType
+            ? {
+                docType: fromText.docType,
+                fiscalYear: fromText.fiscalYear || fromLabel.fiscalYear,
+                quarter: fromText.quarter || fromLabel.quarter,
+                confidence: fromText.confidence,
+                typedFrom: "本文",
+              }
+            : { ...fromLabel, typedFrom: "ラベル" };
         items.push({
           tempId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           label: link.label,
@@ -348,6 +365,39 @@ export async function POST(request) {
 
     // 3. 保存
     const documents = [];
+    // 必要な6種類だけに絞る。ここに無い種別（適時開示・株主通信など）は保存しない。
+    // 訂正版も除く（本体があれば足りるため）。
+    const WANTED_TYPES = new Set([
+      "決算短信", "決算説明資料", "有価証券報告書", "中期経営計画", "説明会書き起こし", "質疑応答",
+    ]);
+    if (onlyStandardTypes) {
+      const before = items.length;
+      // 同じ「種別＋決算期＋四半期」が大量に並ぶのは、ラベルが化けている兆候。
+      // 本文から判定できたものを優先し、1組み合わせにつき1件だけ残す。
+      const best = new Map();
+      const dropped = [];
+      for (const item of items) {
+        const asRef = item.direct && !item.docType;
+        if (asRef) continue; // 直リンクの参考資料は後段でそのまま通す
+        if (!item.docType || !WANTED_TYPES.has(item.docType)) { dropped.push(item); continue; }
+        const key = `${item.docType}|${item.fiscalYear || ""}|${item.quarter || ""}`;
+        const cur = best.get(key);
+        // 本文から判定できたもの＞ラベル判定、同条件なら本文が長いものを採る
+        const score = (x) => (x.typedFrom === "本文" ? 1e9 : 0) + (x.text?.length || 0);
+        if (!cur || score(item) > score(cur)) {
+          if (cur) dropped.push(cur);
+          best.set(key, item);
+        } else dropped.push(item);
+      }
+      const keep = new Set([...best.values(), ...items.filter((i) => i.direct && !i.docType)]);
+      items = items.filter((i) => keep.has(i));
+      if (before !== items.length) {
+        notes.push(
+          `対象の6種類（決算短信・決算説明資料・有価証券報告書・中期経営計画・説明会書き起こし・質疑応答）に絞り、${before - items.length}件を除外しました`
+        );
+      }
+    }
+
     for (const item of items) {
       // 直リンクで、かつ種別を判定できなかったものだけ「参考資料」として扱う
       // （証券会社レポートなど、IRの定型資料ではないもの）。
