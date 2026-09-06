@@ -1427,6 +1427,7 @@ export default function Home() {
           profile: analysisProfile,
           stance,
           thesis,
+          tickerCode,
           external: useExternal,
         }),
       });
@@ -1504,6 +1505,7 @@ export default function Home() {
           profile: analysisProfile,
           stance,
           thesis,
+          tickerCode,
           external: useExternal,
         }),
       });
@@ -1632,6 +1634,7 @@ export default function Home() {
           profile: analysisProfile,
           stance,
           thesis,
+          tickerCode,
         }),
       });
       const aData = await aRes.json();

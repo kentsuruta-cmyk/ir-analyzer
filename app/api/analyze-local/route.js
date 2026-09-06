@@ -5,6 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getCompanyDir } from "../../../lib/filesave.js";
 import { ALLOWED_DOMAINS, SOURCE_SUMMARY } from "../../../lib/sources.js";
 import { RANK_RULES, buildStanceBlock } from "../../../lib/thesis.js";
+import { peersFor, formatPeers } from "../../../lib/peers.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -56,8 +57,17 @@ const RULES_BASE = `あなたは経験豊富な株式投資アナリストです
 ## 総括
 （結論から2〜3行。今どういう局面か、投資妙味の有無を端的に）
 
-## 業界内での位置づけと市況
-（同業・業界の中でこの会社がどこにいるか、そして今の市況がこの会社にとって追い風か逆風か。外部情報が使える設定のときは、競合・業界動向・マクロの市況を出典付きで書く〔媒体名・時期・可能ならURL〕。古い記事は時期を明記する。外部情報が使えない設定のときは「外部情報を使わない設定のため、業界内の比較と市況は行っていません」と1行だけ書く）
+## 競合と業界内での位置づけ
+（次の3つをこの順で書く。
+**数字で見た位置**：同業比較の表が渡されている場合は、そこから読み取れることを書く。
+　全項目をなぞらず、この会社の性格が出ている順位を3〜4点に絞る（強い項目と弱い項目を必ず両方）。
+　表の数字はそのまま引用してよい。表が渡されていない場合は「同業比較のデータがありません」と1行。
+**競合の脅威**：誰が脅威かを具体的に。表の上位企業、事実サマリーに出てくる競合の記述、
+　外部情報が使える設定なら非上場・海外・異業種からの参入も調べて出典付きで補う。
+　「競争は激しい」のような一般論では書かず、どの会社の何が脅威なのかを述べる。
+　この会社が同業に対して持っている優位（あるなら）も同じ具体性で書く。
+**市況**：今の市況がこの会社にとって追い風か逆風か。外部情報が使える設定のときは出典付きで。
+　使えない設定のときは「外部情報を使わない設定のため、市況は扱っていません」と1行）
 
 ## ポテンシャル（こうなれば上がる）
 （【所見】上振れにつながる条件・イベント。箇条書き2〜4点。事実サマリーの変化点や見通しと関連づける）
@@ -120,7 +130,7 @@ export async function POST(request) {
       );
     }
 
-    const { companyName, summaries, documents, question, profile, external, stance, thesis } = await request.json();
+    const { companyName, summaries, documents, question, profile, external, stance, thesis, tickerCode } = await request.json();
     const company = (companyName || "").trim();
     if (!company) {
       return Response.json({ error: "会社名がありません" }, { status: 400 });
@@ -178,6 +188,15 @@ export async function POST(request) {
     const { block: stanceBlock, hasThesis } = buildStanceBlock({ stance, thesis });
     const RULES = buildRules(hasThesis);
 
+    // 同業比較。銘柄コードが分かるときだけ。取れなくても分析は続ける。
+    let peerBlock = "";
+    try {
+      const p = peersFor(tickerCode);
+      if (p) peerBlock = `\n\n${formatPeers(p)}`;
+    } catch (e) {
+      console.error("同業比較の作成に失敗:", e.message);
+    }
+
     const profileBlock = (profile || "").trim()
       ? `\n\n【分析者の視点・重視する観点（この観点・スタイルで分析してください。ただし上の絶対ルールは厳守）】\n${profile.trim()}`
       : "";
@@ -193,10 +212,10 @@ export async function POST(request) {
   ・**会社自身の実績数値・見通し**は、必ず「事実サマリー」からのみ引く（外部の数字で上書きしない）。
   ・**外部（業界・競合）由来の記述**には、必ずその場に出典（媒体名・可能ならURL・時期）を添える。裏取りできない噂・古い情報は書かない。
 - 外部情報は独立セクションに隔離せず、「総括」「ポテンシャル」「リスク」「着眼点」の中で、会社の実績と関連づけて自然に使う。ただし読み手が「これは外部の話」と分かるよう、出典で明示する。
-- 「## 業界内での位置づけ」には、外部で調べた競合・業界の情報を出典付きで書く（見出しは固定。増やしも減らしもしない）。`
+- 「## 競合と業界内での位置づけ」には、外部で調べた競合・業界の情報を出典付きで書く（見出しは固定。増やしも減らしもしない）。競合は社名まで踏み込む。`
       : "";
 
-    const system = `${RULES}${stanceBlock}${profileBlock}${externalBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
+    const system = `${RULES}${stanceBlock}${peerBlock}${profileBlock}${externalBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
     const anthropic = new Anthropic({ apiKey });
 
     // 外部情報ON時はWeb検索ツール（サーバー側実行・出典付き）を渡す。
