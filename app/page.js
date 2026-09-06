@@ -3,7 +3,11 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 
 const STORAGE_KEY = "ir-analyzer-documents";
+import { DEFAULT_STANCE } from "../lib/thesis.js";
+
 const PROFILE_KEY = "ir-analyzer-profile";
+const STANCE_KEY = "ir-analyzer-stance";
+const THESIS_KEY = "ir-analyzer-thesis";
 const COMPANY_KEY = "ir-analyzer-company";
 const TICKER_KEY = "ir-analyzer-ticker";
 const MINFY_KEY = "ir-analyzer-min-fiscal-year";
@@ -897,6 +901,9 @@ export default function Home() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoStage, setAutoStage] = useState("");
   const [analysisProfile, setAnalysisProfile] = useState(DEFAULT_PROFILE);
+  // 投資方針は毎回同じなので保存して使い回す。仮説は銘柄ごとに変わるので都度書く。
+  const [stance, setStance] = useState(DEFAULT_STANCE);
+  const [thesis, setThesis] = useState("");
   const [relabeling, setRelabeling] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -926,6 +933,10 @@ export default function Home() {
         const savedCo = localStorage.getItem(COMPANY_KEY) || "";
         setSelected(standardSelectionFor(parsed, savedCo));
       }
+      const savedStance = localStorage.getItem(STANCE_KEY);
+      if (savedStance != null) setStance(savedStance);
+      const savedThesis = localStorage.getItem(THESIS_KEY);
+      if (savedThesis != null) setThesis(savedThesis);
       const savedProfile = localStorage.getItem(PROFILE_KEY);
       if (savedProfile != null) setAnalysisProfile(savedProfile);
       const savedCompany = localStorage.getItem(COMPANY_KEY);
@@ -953,11 +964,13 @@ export default function Home() {
     if (!loaded) return;
     try {
       localStorage.setItem(PROFILE_KEY, analysisProfile);
+      localStorage.setItem(STANCE_KEY, stance);
+      localStorage.setItem(THESIS_KEY, thesis);
       localStorage.setItem(COMPANY_KEY, companyName);
       localStorage.setItem(TICKER_KEY, tickerCode);
       localStorage.setItem(MINFY_KEY, minFiscalYear);
     } catch {}
-  }, [analysisProfile, companyName, tickerCode, minFiscalYear, loaded]);
+  }, [analysisProfile, stance, thesis, companyName, tickerCode, minFiscalYear, loaded]);
 
   // 要約・分析の結果もブラウザに保存（再読み込み・ホットリロードで消えないように）
   useEffect(() => {
@@ -1412,6 +1425,8 @@ export default function Home() {
           companyName: company,
           ...summaryPayload,
           profile: analysisProfile,
+          stance,
+          thesis,
           external: useExternal,
         }),
       });
@@ -1487,6 +1502,8 @@ export default function Home() {
           companyName: company,
           summaries: consolidated.map((s) => ({ label: s.label, text: s.text })),
           profile: analysisProfile,
+          stance,
+          thesis,
           external: useExternal,
         }),
       });
@@ -1613,6 +1630,8 @@ export default function Home() {
           companyName,
           summaries: sData.summaries.map((s) => ({ label: s.label, text: s.text })),
           profile: analysisProfile,
+          stance,
+          thesis,
         }),
       });
       const aData = await aRes.json();
@@ -2019,6 +2038,59 @@ export default function Home() {
             </li>
           </ol>
         </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label
+            style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#2d3748", marginBottom: 4 }}
+          >
+            この銘柄を見ている理由・仮説（空でも可。書くと「仮説の検証」が付きます）
+          </label>
+          <textarea
+            value={thesis}
+            onChange={(e) => setThesis(e.target.value)}
+            rows={3}
+            className="ask-input"
+            style={{ width: "100%" }}
+            placeholder="例）隠れ半導体銘柄として期待されるべきなのにPERが低いのでは？／食品の消費減税の風を受けやすいのでは？"
+          />
+          <p className="hint">
+            仮説は<b>前提ではなく検証の対象</b>として扱います。支持する事実だけでなく、
+            反証する事実と「開示が無くて確認できなかったこと」を必ず出します。
+            会社の妙味（ランク）と仮説の当否は別々に示します。
+            {thesis.trim() && (
+              <button
+                onClick={() => setThesis("")}
+                style={{ marginLeft: 8, fontSize: 11, padding: "1px 6px", cursor: "pointer" }}
+              >
+                消す
+              </button>
+            )}
+          </p>
+        </div>
+
+        <details style={{ marginBottom: 10 }}>
+          <summary style={{ fontSize: 13, fontWeight: 600, color: "#2d3748", cursor: "pointer" }}>
+            投資方針（好む型・避ける型。ランクの物差しを切り替えます）
+          </summary>
+          <textarea
+            value={stance}
+            onChange={(e) => setStance(e.target.value)}
+            rows={9}
+            className="ask-input"
+            style={{ width: "100%", marginTop: 6 }}
+          />
+          <p className="hint">
+            銘柄の「型」を先に見極めてから、その型の基準でランクを付けます。
+            割安型では減収減益それ自体を理由にDにせず、モメンタム型では最高益をそのままAにせず
+            サイクルのどこにいるかを見ます。避ける型に該当する銘柄はランクとは別に明示します。
+            <button
+              onClick={() => setStance(DEFAULT_STANCE)}
+              style={{ marginLeft: 8, fontSize: 11, padding: "1px 6px", cursor: "pointer" }}
+            >
+              既定に戻す
+            </button>
+          </p>
+        </details>
 
         <div style={{ marginBottom: 10 }}>
           <label

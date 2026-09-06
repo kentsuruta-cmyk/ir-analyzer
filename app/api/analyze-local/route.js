@@ -4,6 +4,7 @@ import crypto from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { getCompanyDir } from "../../../lib/filesave.js";
 import { ALLOWED_DOMAINS, SOURCE_SUMMARY } from "../../../lib/sources.js";
+import { RANK_RULES, buildStanceBlock } from "../../../lib/thesis.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,7 +18,7 @@ const MAX_TOTAL_CHARS = 150000;
 const jobCache = new Map();
 const JOB_TTL_MS = 15 * 60 * 1000;
 
-const RULES = `あなたは経験豊富な株式投資アナリストです。与えられた「事実サマリー（企業の一次情報を、数値の推移・変化点・最新の見通しに絞って忠実にまとめたもの）」を土台に、投資判断を述べます。数値の推移そのものは事実サマリー側に既にあるので、分析では繰り返しません。
+const RULES_BASE = `あなたは経験豊富な株式投資アナリストです。与えられた「事実サマリー（企業の一次情報を、数値の推移・変化点・最新の見通しに絞って忠実にまとめたもの）」を土台に、投資判断を述べます。数値の推移そのものは事実サマリー側に既にあるので、分析では繰り返しません。
 
 【絶対に守るルール】
 1. 会社の財務数値・事実は、提供された「事実サマリー」に書かれているものだけを使う。無い会社の数字は作らない・推測しない。
@@ -27,13 +28,10 @@ const RULES = `あなたは経験豊富な株式投資アナリストです。�
 5. 出典は〔資料名 P.x〕の形で書く。<cite> などのHTMLタグは使わない。
 
 【投資妙味ランクの基準】
-提供された事実サマリーの範囲だけで、会社の開示ベースの状態を相対評価します。株価水準・割安割高（バリュエーション）は判断材料に無いので考慮しません。将来の成果を保証するものではありません。
-「魅力度（A〜D）」と「そもそも判断できるか（判定不能）」は別の軸です。魅力度で迷ったらCに置き、材料が薄くて置けないときだけ判定不能にします。
-- A（積極的に妙味あり）：増収増益・利益率改善・上方修正・受注/需要の追い風など、会社自身の開示ベースで明確な前向き材料があり、目立った下振れ材料が乏しい。
-- B（妙味あり・条件付き）：前向き材料はあるが、条件や懸念が残る。特定の条件（受注回復・コスト一巡・特定セグメントの改善など）が確認できれば妙味が増す。
-- C（中立・様子見）：良い面と悪い面が拮抗し決め手に欠ける、または横ばい。積極的に買う根拠も避ける根拠も強くない。
-- D（見送り・要警戒）：減収減益・下方修正・特別損失・需要悪化など逆風が優勢。
-- 判定不能（情報不足）：開示が薄い／要約に材料が乏しく、A〜Dのどこにも根拠を持って置けない。これは「魅力度が低い」のではなく「判断保留」であり、次にすべきは処分ではなく追加調査。安易な逃げ場にせず、本当に材料が足りないときだけ使う。
+提供された事実サマリーの範囲だけで、会社の開示ベースの状態を相対評価します。
+将来の成果を保証するものではありません。
+
+[[RANK_RULES]]
 
 【出力の形（厳守）】
 下の見出しを、この順番で、過不足なく出します。**毎回まったく同じ構成**にしてください。
@@ -46,7 +44,14 @@ const RULES = `あなたは経験豊富な株式投資アナリストです。�
 （日本語・ですます調・簡潔に）
 
 ## 投資妙味ランク：A / B / C / D / 判定不能
-（先頭でA・B・C・D・判定不能のいずれか1つを明示。続けて、そのランクにした理由を事実サマリーの材料に結びつけて1〜2行。上の基準に従う。ランクは資料ベースの相対評価であり株価の割安割高は含まないことを一言添える。「判定不能」を選んだ場合は、何の情報が足りないのか・どの資料を追加で見れば判断できるのかを必ず具体的に書く）
+（1行目でA・B・C・D・判定不能のいずれか1つを明示。
+続けて次の2行を必ず入れる。
+　「評価の型：◯◯型（この型として見た理由を一言）」
+　仮説が渡されている場合のみ「仮説の確度：高／中／低／検証不能」
+そのうえで、そのランクにした理由を事実サマリーの材料に結びつけて1〜2行。上の型ごとの基準に従う。
+ランクは資料ベースの相対評価であり株価の割安割高は含まないことを一言添える。
+利用者の方針で避ける型に該当する場合は「※この銘柄は方針上の避ける型（◯◯）に該当します」を必ず入れる。
+「判定不能」を選んだ場合は、何の情報が足りないのか・どの資料を追加で見れば判断できるのかを必ず具体的に書く）[[THESIS_SECTION]]
 
 ## 総括
 （結論から2〜3行。今どういう局面か、投資妙味の有無を端的に）
@@ -65,6 +70,25 @@ const RULES = `あなたは経験豊富な株式投資アナリストです。�
 
 ## 着眼点（次に確認すべきこと）
 （今後フォローすべき数字・イベントを箇条書きで数点）`;
+
+// 仮説が渡されているときだけ足す見出し。追認にならないよう、
+// 反証と「確認できなかったこと」を必ず書かせる。
+const THESIS_SECTION_MD = `
+
+## 仮説の検証
+（利用者の仮説を検証する。次の小見出しをこの順で必ず全部書く。
+**確かめられる形に言い換えると**：仮説が成り立つ条件を、資料で確認できる形に言い換える（何がいくらなら成り立つか）
+**支持する事実**：出典付きで挙げる
+**反証する事実**：出典付きで挙げる。見つからなかった場合は「探したが見つからなかった」と書く。空欄にしない
+**確認できなかった事実**：仮説の中心にある数字が開示されていないなど。1つ以上必ず挙げる
+**仮説が崩れる条件**：何が分かったら見立てが間違いだったと言えるか）`;
+
+// 仮説の有無でセクション構成が変わるので、そのつど組み立てる。
+function buildRules(hasThesis) {
+  return RULES_BASE
+    .replace("[[RANK_RULES]]", RANK_RULES)
+    .replace("[[THESIS_SECTION]]", hasThesis ? THESIS_SECTION_MD : "");
+}
 
 // _要約フォルダから既存の要約Markdownを読み込む
 function readSummariesFromDisk(company) {
@@ -96,7 +120,7 @@ export async function POST(request) {
       );
     }
 
-    const { companyName, summaries, documents, question, profile, external } = await request.json();
+    const { companyName, summaries, documents, question, profile, external, stance, thesis } = await request.json();
     const company = (companyName || "").trim();
     if (!company) {
       return Response.json({ error: "会社名がありません" }, { status: 400 });
@@ -150,6 +174,10 @@ export async function POST(request) {
 
     // ユーザーの分析プロファイル（観点・手法・口調）を反映。ただし上のRULES（引用強制・
     // 事実と所見の分離・要約に無いことは述べない）は厳守で、プロファイルはそれを上書きしない。
+    // 型ごとのランク基準と、仮説の検証。仮説が無ければ従来どおりの構成。
+    const { block: stanceBlock, hasThesis } = buildStanceBlock({ stance, thesis });
+    const RULES = buildRules(hasThesis);
+
     const profileBlock = (profile || "").trim()
       ? `\n\n【分析者の視点・重視する観点（この観点・スタイルで分析してください。ただし上の絶対ルールは厳守）】\n${profile.trim()}`
       : "";
@@ -168,7 +196,7 @@ export async function POST(request) {
 - 「## 業界内での位置づけ」には、外部で調べた競合・業界の情報を出典付きで書く（見出しは固定。増やしも減らしもしない）。`
       : "";
 
-    const system = `${RULES}${profileBlock}${externalBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
+    const system = `${RULES}${stanceBlock}${profileBlock}${externalBlock}\n\n【参照可能な要約は以下がすべてです】${block}`;
     const anthropic = new Anthropic({ apiKey });
 
     // 外部情報ON時はWeb検索ツール（サーバー側実行・出典付き）を渡す。
@@ -226,7 +254,7 @@ export async function POST(request) {
           const fix = await anthropic.messages.create({
             model: ANALYSIS_MODEL,
             max_tokens: 700,
-            system: `${RULES}\n\n【今回の依頼】上の基準に従い、「## 投資妙味ランク：」の行と、その理由（1〜2行）だけを出力してください。他の見出しや本文は書かないでください。`,
+            system: `${buildRules(false)}\n\n【今回の依頼】上の基準に従い、「## 投資妙味ランク：」の行と、その理由（1〜2行）だけを出力してください。他の見出しや本文は書かないでください。`,
             messages: [
               {
                 role: "user",
