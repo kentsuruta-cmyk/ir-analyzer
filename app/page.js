@@ -181,6 +181,8 @@ function pickStandardSet(allDocs) {
   const minYear = new Date().getFullYear() - STANDARD_MAX_AGE_YEARS;
   // 西暦の決算期が読めないもの（第N期・不明）は判断できないので残す
   const docs = allDocs.filter((d) => {
+    // _unclassified は種別も決算期も当てにならない（人権方針が「質疑応答」になっていた）ので選ばない
+    if ((d.savedPath || "").includes("/_unclassified/")) return false;
     const y = docSeirekiYear(d);
     return y === null || y >= minYear;
   });

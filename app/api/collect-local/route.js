@@ -14,6 +14,22 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const MAX_PDFS_TOTAL = 48;
+// リンク文字にこの種別名が書いてあれば、それが書類名そのものなので本文より信じる。
+const DEFINITIVE_LABEL_TYPES = new Set([
+  "株主通信", "決算短信", "訂正決算短信", "有価証券報告書", "訂正有価証券報告書", "半期報告書", "四半期報告書",
+]);
+// 取り込み対象外だとリンク文字だけで確定できる種別。ダウンロードする前に外す
+// （株主通信や統合報告書の一括版は20〜50MBあり、落としてから捨てると取り込みが10分近くかかっていた）。
+const SKIP_BY_LABEL_TYPES = new Set(["株主通信", "半期報告書", "四半期報告書"]);
+const RE_LABEL_QUARTER = /(第\s*[1-4１-４一二三四]\s*四半期|中間期|通期)/;
+// リンク文字に書かれたファイルサイズ（「（PDF：23.0MB）」など）。決算短信・説明資料・有報は
+// せいぜい数MBなので、これを超えるのは統合報告書や株主向け報告書の一括版。落とすと
+// タイムアウトまで1件1分待たされるので、ダウンロードせずに外す。
+const MAX_LABEL_MB = 15;
+function labelSizeMB(label) {
+  const m = (label || "").replace(/[０-９．]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)).match(/(\d+(?:\.\d+)?)\s*MB/i);
+  return m ? Number(m[1]) : null;
+}
 // 取り込む決算期の下限の既定値。直近4期あれば推移は追えるので、それより前は取り込まない。
 export const DEFAULT_MIN_FISCAL_YEAR = new Date().getFullYear() - 3;
 const MAX_CHARS_PER_PDF = 30000;
@@ -23,7 +39,9 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 async function downloadPdf(url) {
-  const res = await fetch(url, { headers: { "User-Agent": UA } });
+  // 応答しないPDFが1件あるだけで取り込み全体が「取り込み中」のまま止まらないよう、
+  // 1件あたりの待ち時間に上限を設ける（超えたらその資料だけ読み取り失敗として先へ進む）。
+  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(60_000) });
   if (!res.ok) throw new Error(`ダウンロード失敗（ステータス ${res.status}）`);
   return Buffer.from(await res.arrayBuffer());
 }
@@ -83,11 +101,36 @@ function labelYear(label) {
   return m ? Number(m[1]) : null;
 }
 
-function selectDocuments(candidates, limit, minFiscalYear) {
+function selectDocuments(candidates, limit, minFiscalYear, skipTypes = null) {
   const groups = new Map();
   const skippedOld = [];
+  let skippedType = 0;
+  // リンク文字が「PDF形式」だけの資料は、同じフォルダに並ぶ兄弟のリンク文字から種別を推す。
+  // サンメッセでは株主通信（/ir/library/pdf/report/74c.pdf「株主通信 第74期」）と同じ並びの
+  // 81c.pdf が「PDF形式」としか書かれておらず、文字化けPDFのためAIが決算説明資料と誤判定していた。
+  const dirOf = (url) => (url || "").split("?")[0].replace(/[^/]*$/, "");
+  const dirTypes = new Map();
+  for (const c of candidates) {
+    const t = classifyFromLabel(c.label).docType;
+    if (!t) continue;
+    const m = dirTypes.get(dirOf(c.url)) || new Map();
+    m.set(t, (m.get(t) || 0) + 1);
+    dirTypes.set(dirOf(c.url), m);
+  }
+  const siblingType = (url) => {
+    const m = dirTypes.get(dirOf(url));
+    if (!m) return null;
+    const total = [...m.values()].reduce((a, b) => a + b, 0);
+    const [top, n] = [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+    return total >= 3 && n / total >= 0.7 ? top : null;
+  };
   candidates.forEach((c, domIndex) => {
     const { docType, fiscalYear, quarter } = classifyFromLabel(c.label);
+    const effectiveType = docType || siblingType(c.url);
+    if (skipTypes && (skipTypes.has(effectiveType) || (labelSizeMB(c.label) ?? 0) > MAX_LABEL_MB)) {
+      skippedType++;
+      return;
+    }
 
     // 古い資料の足切り。決算期を読み取れないものは判断できないので残す
     // （読み取れないものを落とすと、決算期が書かれていない質疑応答などを取りこぼす）。
@@ -124,7 +167,7 @@ function selectDocuments(candidates, limit, minFiscalYear) {
   };
   roundRobin(typed);
   roundRobin(untyped);
-  return { picked: out, skippedOld: skippedOld.length };
+  return { picked: out, skippedOld: skippedOld.length, skippedType };
 }
 
 // URLが直接PDFを指しているか（証券会社レポートの直リンクなど）。
@@ -268,18 +311,22 @@ export async function POST(request) {
     // 直リンク指定は明示的な指示なので、必ず残す。
     const directLinks = allLinks.filter((l) => l.direct);
     const crawledLinks = allLinks.filter((l) => !l.direct);
-    const { picked, skippedOld } = selectDocuments(
+    const { picked, skippedOld, skippedType } = selectDocuments(
       crawledLinks,
       Math.max(0, MAX_PDFS_TOTAL - directLinks.length),
-      minFiscalYear
+      minFiscalYear,
+      onlyStandardTypes ? SKIP_BY_LABEL_TYPES : null
     );
+    if (skippedType > 0) {
+      notes.push(`株主通信・半期報告書・15MB超の一括版など対象外の資料${skippedType}件はダウンロードしませんでした`);
+    }
     if (skippedOld > 0) {
       notes.push(`${minFiscalYear}年3月期より前の資料${skippedOld}件は設定により取り込みません`);
     }
-    if (crawledLinks.length - skippedOld > picked.length) {
+    if (crawledLinks.length - skippedOld - skippedType > picked.length) {
       const kinds = [...new Set(picked.map((p) => p.docType).filter(Boolean))];
       notes.push(
-        `候補${crawledLinks.length - skippedOld}件から${picked.length}件を選びました` +
+        `候補${crawledLinks.length - skippedOld - skippedType}件から${picked.length}件を選びました` +
           `（種別ごとに決算期の新しい順${kinds.length ? "：" + kinds.join("・") : ""}）。` +
           `足りない資料があれば、そのPDFのURLを直接URL欄に貼ると必ず取り込みます。`
       );
@@ -287,8 +334,17 @@ export async function POST(request) {
     allLinks = [...directLinks, ...picked];
 
     // 1. まずダウンロード＋ラベルベースの決定的分類（LLM不要）
-    let items = [];
-    for (const link of allLinks) {
+    // サイトの応答が遅いと48件の順番待ちで10分近くかかっていたので、数件ずつ並行して取りに行く。
+    // 結果は元の並び順（＝選別で決めた優先順）のまま items / notes に積む。
+    const DOWNLOAD_CONCURRENCY = 4;
+    const slots = allLinks.map(() => ({ items: [], notes: [] }));
+    let nextLink = 0;
+    const downloadWorker = async () => {
+    while (nextLink < allLinks.length) {
+      const slot = slots[nextLink];
+      const link = allLinks[nextLink++];
+      const items = slot.items;
+      const notes = slot.notes;
       try {
         // 2回目以降：同じURLを取り込み済みなら、再ダウンロードせずローカルのPDFを読む。
         const cachedPath = getSavedPathForUrl(company, link.url);
@@ -313,13 +369,19 @@ export async function POST(request) {
         // ただしリンク文字が「株主通信」と明言しているものはラベルを信じる。
         // 株主通信は本文で中期経営計画や決算説明に触れるのが普通で、本文判定だと
         // 中期経営計画などに化けて標準セットに紛れ込む（サンメッセ 第74期株主通信）。
-        const labelIsDefinitive = fromLabel.docType === "株主通信";
+        // 同じく、リンク文字が書類名そのもの（決算短信・有価証券報告書・半期報告書など）なら
+        // 種別はラベルを信じる。本文は他の書類に言及するので、半期報告書が本文中の
+        // 「有価証券報告書」で有報に化けていた（サンメッセ）。
+        const labelIsDefinitive = DEFINITIVE_LABEL_TYPES.has(fromLabel.docType);
+        // 四半期もリンク文字に書いてあればそちらを採る。本文は「通期業績予想」などに
+        // 反応して、第1四半期の短信まで通期と判定してしまう。
+        const labelQuarter = RE_LABEL_QUARTER.test(warekiToSeireki(link.label)) ? fromLabel.quarter : null;
         const heuristic =
-          fromText && fromText.docType && !labelIsDefinitive
+          fromText && fromText.docType
             ? {
-                docType: fromText.docType,
-                fiscalYear: fromText.fiscalYear || fromLabel.fiscalYear,
-                quarter: fromText.quarter || fromLabel.quarter,
+                docType: labelIsDefinitive ? fromLabel.docType : fromText.docType,
+                fiscalYear: fromLabel.fiscalYear && labelIsDefinitive ? fromLabel.fiscalYear : fromText.fiscalYear || fromLabel.fiscalYear,
+                quarter: labelQuarter || fromText.quarter || fromLabel.quarter,
                 confidence: fromText.confidence,
                 typedFrom: "本文",
               }
@@ -340,6 +402,13 @@ export async function POST(request) {
       } catch (e) {
         notes.push(`${link.label} … 読み取り失敗（${e.message}）`);
       }
+    }
+    };
+    await Promise.all(Array.from({ length: DOWNLOAD_CONCURRENCY }, downloadWorker));
+    let items = [];
+    for (const slot of slots) {
+      items.push(...slot.items);
+      notes.push(...slot.notes);
     }
 
     // 2. 低確信度の項目だけをバッチでLLM分類（トークン節約）
