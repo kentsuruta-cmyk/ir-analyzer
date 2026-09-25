@@ -1,6 +1,6 @@
 import fs from "fs";
 import { crawlForPdfLinks } from "../../../lib/crawler.js";
-import { classifyFromLabel, classifyBatchWithClaude } from "../../../lib/classify.js";
+import { classifyFromLabel, classifyBatchWithClaude, warekiToSeireki } from "../../../lib/classify.js";
 import {
   saveDocument,
   saveReferenceDocument,
@@ -79,7 +79,7 @@ function fiscalYearNumber(fiscalYear) {
 // これが無いと、関連ページまで辿るようになってから古い四半期報告書が
 // 年の足切りをすり抜けて大量に入ってしまう。
 function labelYear(label) {
-  const m = (label || "").match(/((?:19|20)\d{2})[.\-/年]\s*\d{1,2}[.\-/月]/);
+  const m = warekiToSeireki(label).match(/((?:19|20)\d{2})[.\-/年]\s*\d{1,2}[.\-/月]/);
   return m ? Number(m[1]) : null;
 }
 
@@ -310,8 +310,12 @@ export async function POST(request) {
         // 本文から判定できたらそちらを優先し、読めないときだけラベルに頼る。
         const fromLabel = classifyFromLabel(link.label);
         const fromText = text ? classifyFromLabel((text || "").slice(0, CLASSIFY_TEXT_CHARS)) : null;
+        // ただしリンク文字が「株主通信」と明言しているものはラベルを信じる。
+        // 株主通信は本文で中期経営計画や決算説明に触れるのが普通で、本文判定だと
+        // 中期経営計画などに化けて標準セットに紛れ込む（サンメッセ 第74期株主通信）。
+        const labelIsDefinitive = fromLabel.docType === "株主通信";
         const heuristic =
-          fromText && fromText.docType
+          fromText && fromText.docType && !labelIsDefinitive
             ? {
                 docType: fromText.docType,
                 fiscalYear: fromText.fiscalYear || fromLabel.fiscalYear,

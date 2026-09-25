@@ -98,8 +98,18 @@ const STANDARD_SET_TYPES = [
 
 // 決算期の新しさを数値化する。「2026年3月期」「2025年度」「第85期」を扱う。
 // 同じ種別どうしの比較にしか使わないので、表記系統が混ざっても実害は出にくい。
+// 和暦（平成29年3月期 など）は西暦に直してから読む。
+const ERA_BASE = { 明治: 1867, 大正: 1911, 昭和: 1925, 平成: 1988, 令和: 2018 };
+function toSeireki(text) {
+  return (text || "")
+    .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/(明治|大正|昭和|平成|令和)\s*(元|\d{1,2})\s*年/g, (_, era, n) =>
+      `${ERA_BASE[era] + (n === "元" ? 1 : Number(n))}年`
+    );
+}
+
 function periodRank(fiscalYear, quarter) {
-  const fy = fiscalYear || "";
+  const fy = toSeireki(fiscalYear);
   let year = null;
   const m1 = fy.match(/((?:19|20)\d{2})年\s*\d{1,2}\s*月期/);
   const m2 = fy.match(/((?:19|20)\d{2})\s*年度/);
@@ -120,11 +130,33 @@ function isType(doc, type) {
 
 // 種別ごとに最新の1件を返す。決算期が読めないものは、資料棚の並び順（＝IRページの
 // 掲載順、通常は新しい順）で先に出てきたものを採る。
+// 決算期欄が「不明」でも、資料名に「平成29年3月期」などと書いてあればそれで順位を付ける。
+function docRank(d) {
+  const r = periodRank(d.fiscalYear, d.quarter);
+  return r >= 0 ? r : periodRank(toSeireki(d.label), d.quarter);
+}
+
+// 標準セットに入れてよい古さの上限（今年から数えた年数）。これより古い決算期の
+// 資料は、その種別で唯一の資料でも選ばない（平成29年の短信が「最新の決算短信」
+// として選ばれるのを防ぐ）。
+const STANDARD_MAX_AGE_YEARS = 3;
+
+// 資料の決算期を西暦で返す。「第81期」のように西暦に直せないものは null
+// （periodRank は第N期を1900+Nとして扱うので、年の足切りには使えない）。
+function docSeirekiYear(d) {
+  for (const t of [d.fiscalYear, d.label]) {
+    const s = toSeireki(t);
+    const m = s.match(/((?:19|20)\d{2})年\s*\d{1,2}\s*月期/) || s.match(/((?:19|20)\d{2})\s*年度/);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
 function latestOfType(docs, type) {
   const cands = docs.filter((d) => d.savedPath && isType(d, type));
   if (!cands.length) return null;
   return cands
-    .map((d, i) => ({ d, i, rank: periodRank(d.fiscalYear, d.quarter) }))
+    .map((d, i) => ({ d, i, rank: docRank(d) }))
     .sort((a, b) => b.rank - a.rank || a.i - b.i)[0].d;
 }
 
@@ -145,7 +177,13 @@ function standardSelectionFor(docs, company) {
   return next;
 }
 
-function pickStandardSet(docs) {
+function pickStandardSet(allDocs) {
+  const minYear = new Date().getFullYear() - STANDARD_MAX_AGE_YEARS;
+  // 西暦の決算期が読めないもの（第N期・不明）は判断できないので残す
+  const docs = allDocs.filter((d) => {
+    const y = docSeirekiYear(d);
+    return y === null || y >= minYear;
+  });
   const picked = [];
   const push = (d) => {
     if (d && !picked.some((p) => p.url === d.url)) picked.push(d);
@@ -154,7 +192,7 @@ function pickStandardSet(docs) {
   // 1. 直近1年分の決算短信（直近4四半期）
   const tanshin = docs
     .filter((d) => d.savedPath && isType(d, "決算短信"))
-    .map((d, i) => ({ d, i, rank: periodRank(d.fiscalYear, d.quarter) }))
+    .map((d, i) => ({ d, i, rank: docRank(d) }))
     .sort((a, b) => b.rank - a.rank || a.i - b.i);
   tanshin.slice(0, TANSHIN_QUARTERS).forEach((x) => push(x.d));
 
