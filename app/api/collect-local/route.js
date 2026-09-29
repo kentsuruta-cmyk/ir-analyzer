@@ -1,6 +1,13 @@
 import fs from "fs";
 import { crawlForPdfLinks } from "../../../lib/crawler.js";
-import { classifyFromLabel, classifyBatchWithClaude, warekiToSeireki } from "../../../lib/classify.js";
+import {
+  classifyFromLabel,
+  classifyFromHeader,
+  classifyBatchWithClaude,
+  warekiToSeireki,
+  headerDateYear,
+  isImpossibleFuturePeriod,
+} from "../../../lib/classify.js";
 import {
   saveDocument,
   saveReferenceDocument,
@@ -365,7 +372,18 @@ export async function POST(request) {
         // 表紙に「2027年3月期 第1四半期 決算短信」と書いてあるPDF自身のほうが確かなので、
         // 本文から判定できたらそちらを優先し、読めないときだけラベルに頼る。
         const fromLabel = classifyFromLabel(link.label);
-        const fromText = text ? classifyFromLabel((text || "").slice(0, CLASSIFY_TEXT_CHARS)) : null;
+        // 本文は「表紙の見出し」だけで判定する。本文全体だと、第1四半期の短信でも
+        // 「通期業績予想」の語に反応して通期になっていた（酉島製作所の平成24〜28年の短信）。
+        // 見出しで種別が決まらない資料だけ、従来どおり本文の冒頭3000字で種別を拾う。
+        let fromText = null;
+        if (text) {
+          const head = classifyFromHeader(text);
+          if (head.docType) fromText = head;
+          else {
+            const body = classifyFromLabel(text.slice(0, CLASSIFY_TEXT_CHARS));
+            fromText = { ...body, fiscalYear: head.fiscalYear, quarter: head.quarter };
+          }
+        }
         // ただしリンク文字が「株主通信」と明言しているものはラベルを信じる。
         // 株主通信は本文で中期経営計画や決算説明に触れるのが普通で、本文判定だと
         // 中期経営計画などに化けて標準セットに紛れ込む（サンメッセ 第74期株主通信）。
@@ -428,11 +446,32 @@ export async function POST(request) {
             item.quarter = r.quarter !== "不明" ? r.quarter : item.quarter;
           }
         }
+        // まだ存在しない決算期（今は2026年なのに2028年3月期など）は読み間違いなので捨てる
+        for (const item of lowConfidence) {
+          if (isImpossibleFuturePeriod(item.fiscalYear)) item.fiscalYear = null;
+        }
         if (!process.env.ANTHROPIC_API_KEY) {
           notes.push(`${lowConfidence.length}件は自動判定できませんでした（ANTHROPIC_API_KEY未設定）`);
         }
       } catch (e) {
         notes.push(`LLMによる分類に失敗しました（${e.message}）`);
+      }
+    }
+
+    // 2.5 中身を読んだあとで、もう一度「◯年3月期より前は取り込まない」をかける。
+    // リンク文字に年が無いサイト（酉島製作所の英語側 tanshin_201203_first.pdf など）では
+    // ダウンロード前の足切りをすり抜け、10年以上前の短信や2017年の中期経営計画が入っていた。
+    // 手で直リンクを貼ったものは明示的な指示なので残す。
+    if (minFiscalYear) {
+      const before = items.length;
+      items = items.filter((item) => {
+        if (item.direct) return true;
+        const y = fiscalYearNumber(item.fiscalYear) ?? headerDateYear(item.text);
+        return y === null || y >= minFiscalYear;
+      });
+      const removed = before - items.length;
+      if (removed > 0) {
+        notes.push(`中身を確認したところ${minFiscalYear}年3月期より前の資料だった${removed}件は取り込みませんでした`);
       }
     }
 

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { warekiToSeireki, classifyFromHeader, isImpossibleFuturePeriod } from "../../../lib/classify.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -64,8 +65,13 @@ export async function POST(request) {
 
     const items = docs.map((d) => ({
       id: String(d.id),
-      textPrefix: (d.text || "").slice(0, CHARS),
+      // 和暦は先に西暦へ直してから渡す。「平成24年3月期」をそのまま渡すと、
+      // モデルが元号を落として「2024年3月期」と答え、10年以上前の短信が
+      // 最新の資料として並んでいた（酉島製作所）。
+      textPrefix: warekiToSeireki((d.text || "").slice(0, CHARS)),
+      header: classifyFromHeader(d.text || ""),
     }));
+    const headerById = new Map(items.map((i) => [i.id, i.header]));
 
     const anthropic = new Anthropic({ apiKey });
     const res = await anthropic.messages.create({
@@ -124,9 +130,14 @@ export async function POST(request) {
     const labels = {};
     const fields = {};
     for (const r of results) {
-      const fiscalYear = (r.fiscalPeriod || "").trim();
+      // 表紙の見出しから決算期・四半期が機械的に読めたら、モデルの答えよりそちらを信じる。
+      const head = headerById.get(String(r.id)) || {};
+      let fiscalYear = (head.fiscalYear || r.fiscalPeriod || "").trim();
+      // まだ存在しない決算期は読み間違いなので空にする
+      if (isImpossibleFuturePeriod(fiscalYear)) fiscalYear = "";
       const when = fiscalYear || (r.date || "").trim();
-      const q = r.quarter && r.quarter !== "不明" ? r.quarter.trim() : "";
+      const rawQ = head.fiscalYear && head.quarter ? head.quarter : r.quarter;
+      const q = rawQ && rawQ !== "不明" ? rawQ.trim() : "";
       const docType = normalizeDocType(r.docType);
       const parts = [when, q, docType].filter(Boolean);
       if (parts.length) labels[r.id] = parts.join(" ");
