@@ -7,6 +7,7 @@ import {
   warekiToSeireki,
   headerDateYear,
   isImpossibleFuturePeriod,
+  normalizeFiscalYear,
 } from "../../../lib/classify.js";
 import {
   saveDocument,
@@ -24,6 +25,8 @@ const MAX_PDFS_TOTAL = 48;
 // リンク文字にこの種別名が書いてあれば、それが書類名そのものなので本文より信じる。
 const DEFINITIVE_LABEL_TYPES = new Set([
   "株主通信", "決算短信", "訂正決算短信", "有価証券報告書", "訂正有価証券報告書", "半期報告書", "四半期報告書",
+  // 「決算説明会（スクリプト）」の本文表紙は「決算説明会」なので、本文判定だと決算説明資料になる
+  "説明会書き起こし",
 ]);
 // 取り込み対象外だとリンク文字だけで確定できる種別。ダウンロードする前に外す
 // （株主通信や統合報告書の一括版は20〜50MBあり、落としてから捨てると取り込みが10分近くかかっていた）。
@@ -270,7 +273,15 @@ export async function POST(request) {
     if (pageTargets.length > 0) {
       const { chromium } = await import("playwright");
       browser = await chromium.launch({ headless: true });
-      const context = await browser.newContext({ userAgent: UA });
+      // 日本語のブラウザとして開く。自動ブラウザの既定は英語（en-US）で、
+      // 言語設定を見て自動で英語に翻訳するサイト（酉島製作所など）では、
+      // 資料名がすべて英語になって決算短信・有報として認識できず、ほぼ全部が捨てられていた。
+      const context = await browser.newContext({
+        userAgent: UA,
+        locale: "ja-JP",
+        timezoneId: "Asia/Tokyo",
+        extraHTTPHeaders: { "Accept-Language": "ja-JP,ja;q=0.9" },
+      });
 
       for (const target of pageTargets) {
         const page = await context.newPage();
@@ -380,9 +391,23 @@ export async function POST(request) {
           const head = classifyFromHeader(text);
           if (head.docType) fromText = head;
           else {
+            // 表紙で種別が決まらないときは、リンク文字の種別を本文の拾い読みより優先する。
+            // 本文の3000字には「中期経営計画の進捗」などが出てくるので、
+            // 本決算の決算説明資料が中期経営計画に化けていた（酉島製作所 FY2024）。
             const body = classifyFromLabel(text.slice(0, CLASSIFY_TEXT_CHARS));
-            fromText = { ...body, fiscalYear: head.fiscalYear, quarter: head.quarter };
+            fromText = {
+              ...body,
+              docType: fromLabel.docType || body.docType,
+              fiscalYear: head.fiscalYear,
+              quarter: head.quarter,
+            };
           }
+        }
+        // 決算期の表記をそろえる。本文が「2025年度」としか読めず、リンク文字（見出し）に
+        // 「2026年3月期」と書いてあるなら、そちらを使う（同じ期が2通りの名前で並ぶのを防ぐ）。
+        const RE_KESSANKI = /(19|20)\d{2}年\s*\d{1,2}\s*月期/;
+        if (fromText && !RE_KESSANKI.test(fromText.fiscalYear || "") && RE_KESSANKI.test(fromLabel.fiscalYear || "")) {
+          fromText = { ...fromText, fiscalYear: fromLabel.fiscalYear };
         }
         // ただしリンク文字が「株主通信」と明言しているものはラベルを信じる。
         // 株主通信は本文で中期経営計画や決算説明に触れるのが普通で、本文判定だと
@@ -449,6 +474,10 @@ export async function POST(request) {
         // まだ存在しない決算期（今は2026年なのに2028年3月期など）は読み間違いなので捨てる
         for (const item of lowConfidence) {
           if (isImpossibleFuturePeriod(item.fiscalYear)) item.fiscalYear = null;
+          // 業績予想修正の資料はAIが「通期」と答えても通期決算の資料ではない
+          if (/業績予想.{0,4}修正|RevisedForecast/i.test(`${item.label} ${item.url} ${(item.text || "").slice(0, 200)}`) && item.quarter === "通期") {
+            item.quarter = null;
+          }
         }
         if (!process.env.ANTHROPIC_API_KEY) {
           notes.push(`${lowConfidence.length}件は自動判定できませんでした（ANTHROPIC_API_KEY未設定）`);
@@ -473,6 +502,11 @@ export async function POST(request) {
       if (removed > 0) {
         notes.push(`中身を確認したところ${minFiscalYear}年3月期より前の資料だった${removed}件は取り込みませんでした`);
       }
+    }
+
+    // 決算期の表記をそろえる（同じ期が「2025年3月期」と「2024年度（2025年3月期）」で並ばないように）
+    for (const item of items) {
+      if (item.fiscalYear) item.fiscalYear = normalizeFiscalYear(item.fiscalYear);
     }
 
     // 3. 保存
