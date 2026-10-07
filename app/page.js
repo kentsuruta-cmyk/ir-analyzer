@@ -819,6 +819,369 @@ function sigmaClass(n) {
   return "";
 }
 
+const bai = (n) => (n == null ? "—" : `${n.toFixed(1)}倍`);
+
+// PERの推移グラフ。過去の中央50%（下位25%〜上位25%）を帯、中央値を点線で重ねる。
+function PerChart({ v }) {
+  const W = 720, H = 200, L = 40, R = 78, T = 10, B = 22;
+  const pts = v.weekly;
+  if (!pts || pts.length < 2) return null;
+  const lo = Math.min(v.band.min, v.per) * 0.92;
+  const hi = Math.max(v.band.max, v.per) * 1.05;
+  const x = (i) => L + ((W - L - R) * i) / (pts.length - 1);
+  const y = (per) => T + (H - T - B) * (1 - (per - lo) / (hi - lo));
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.per).toFixed(1)}`).join("");
+  // 年の変わり目に目盛りを打つ
+  const years = [];
+  pts.forEach((p, i) => {
+    if (i && p.date.slice(0, 4) !== pts[i - 1].date.slice(0, 4)) years.push({ i, label: p.date.slice(0, 4) });
+  });
+  const guide = (per, label, cls) => (
+    <g key={label}>
+      <line x1={L} x2={W - R} y1={y(per)} y2={y(per)} className={cls} />
+      <text x={W - R + 4} y={y(per) + 3} className="val-axis">{label} {per.toFixed(0)}</text>
+    </g>
+  );
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="val-chart" role="img" aria-label="予想PERの推移">
+      <rect x={L} y={y(v.band.p75)} width={W - L - R} height={y(v.band.p25) - y(v.band.p75)} className="val-bandfill" />
+      {guide(v.band.p75, "上位25%", "val-guide")}
+      {guide(v.band.median, "中央", "val-median")}
+      {guide(v.band.p25, "下位25%", "val-guide")}
+      {years.map((t) => (
+        <g key={t.label}>
+          <line x1={x(t.i)} x2={x(t.i)} y1={T} y2={H - B} className="val-grid" />
+          <text x={x(t.i) + 3} y={H - 7} className="val-axis">{t.label}</text>
+        </g>
+      ))}
+      <text x={4} y={y(hi) + 10} className="val-axis">{hi.toFixed(0)}倍</text>
+      <text x={4} y={y(lo)} className="val-axis">{lo.toFixed(0)}倍</text>
+      <path d={line} className="val-line" />
+      <circle cx={x(pts.length - 1)} cy={y(v.per)} r="4" className="val-dot" />
+    </svg>
+  );
+}
+
+// 過去のPERと比べた、いまの株価の位置。「会社が良いか」とは別の軸として出す。
+function ValuationPanel({ data }) {
+  const v = data?.valuation;
+  const [customPer, setCustomPer] = useState("");
+  if (!v) return null;
+  if (v.error) {
+    return (
+      <div className="tech">
+        <div className="perf-head"><strong className="perf-title">📊 過去のPERと比べた株価の位置</strong></div>
+        <p className="tech-note">{v.error}</p>
+      </div>
+    );
+  }
+  const gradeCls = { A: "tech-ok", B: "tech-ok", C: "tech-warn", D: "tech-stop" }[v.grade];
+  const o = v.oneYear;
+  const cp = parseFloat(customPer);
+  const years = Math.round((new Date(v.asOf) - new Date(v.from)) / (365.25 * 864e5) * 10) / 10;
+
+  return (
+    <div className="tech">
+      <div className="perf-head">
+        <strong className="perf-title">📊 過去のPERと比べた株価の位置</strong>
+        <span className="tech-meta">
+          終値 {yen(v.price)}円 @{v.asOf}／会社予想EPS {v.eps.toFixed(1)}円
+          （{v.epsSource.date} 開示・{v.epsSource.fyEnd.slice(0, 7)}期）
+        </span>
+      </div>
+
+      <div className={`tech-verdict ${gradeCls}`}>
+        <div className="tech-verdict-label">
+          株価の位置：{v.grade}（{v.gradeLabel}）
+        </div>
+        <ul className="tech-reasons">
+          <li>
+            いまの予想PERは <b>{bai(v.per)}</b>。過去{years}年の中で下から <b>{Math.round(v.positionPct)}%</b> の位置
+            （中央値 {bai(v.band.median)}、最低 {bai(v.band.min)}、最高 {bai(v.band.max)}）
+          </li>
+          {o && (
+            <li>
+              この1年で株価は {pct(o.pricePct)}。内訳は 会社予想EPS {pct(o.epsPct)}
+              （{o.epsFrom.toFixed(1)}→{v.eps.toFixed(1)}円）× PER {pct(o.perPct)}
+              （{bai(o.perFrom)}→{bai(v.per)}）
+            </li>
+          )}
+        </ul>
+      </div>
+
+      <PerChart v={v} />
+
+      <div className="val-cols">
+        <div className="perf-scroll">
+          <table className="perf-table tech-table">
+            <thead>
+              <tr><th>PERがここまで動くと</th><th>PER</th><th>株価</th><th>いまから</th></tr>
+            </thead>
+            <tbody>
+              {v.scenario.map((r) => (
+                <tr key={r.label}>
+                  <th scope="row" className="tech-rowhead">{r.label}</th>
+                  <td>{bai(r.per)}</td>
+                  <td>{yen(r.price)}円</td>
+                  <td className={r.changePct >= 0 ? "val-up" : "val-down"}>{pct(r.changePct)}</td>
+                </tr>
+              ))}
+              <tr>
+                <th scope="row" className="tech-rowhead">
+                  自分で入れる
+                </th>
+                <td>
+                  <input
+                    className="val-input"
+                    inputMode="decimal"
+                    placeholder="25"
+                    value={customPer}
+                    onChange={(e) => setCustomPer(e.target.value)}
+                  />倍
+                </td>
+                <td>{cp > 0 ? `${yen(cp * v.eps)}円` : "—"}</td>
+                <td className={cp > 0 ? (cp * v.eps >= v.price ? "val-up" : "val-down") : ""}>
+                  {cp > 0 ? pct(((cp * v.eps) / v.price - 1) * 100) : "—"}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="perf-scroll">
+          <table className="perf-table tech-table">
+            <thead>
+              <tr><th>年</th><th>PER最低</th><th>中央</th><th>最高</th><th>年末時点の予想EPS</th></tr>
+            </thead>
+            <tbody>
+              {v.yearly.map((r) => (
+                <tr key={r.year}>
+                  <th scope="row" className="tech-rowhead">{r.year}</th>
+                  <td>{bai(r.low)}</td>
+                  <td>{bai(r.median)}</td>
+                  <td>{bai(r.high)}</td>
+                  <td>{r.epsEnd.toFixed(1)}円</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p className="tech-note">
+        予想PER＝株価÷その時点で開示されていた会社予想EPS（J-Quants・{v.from}〜の{v.days}営業日）。
+        予想EPSは株式分割でずれないよう「会社予想の純利益÷自己株式を除く株数」で計算しているため、短信の記載と数円ずれることがあります。
+        株価の表は「いまの会社予想EPS × そのPER」の掛け算で、予想EPSが変われば株価も変わります。
+        評価は過去の分布の中の位置だけで機械的に付けています（下から25%未満=A、50%未満=B、80%未満=C、それ以上=D）。
+        会社の成長や業績の良し悪しは含みません。売買の推奨ではありません。
+        {v.lossDays > 0 ? ` 赤字予想だった${v.lossDays}営業日は除いています。` : ""}
+        {v.noForecastDays > 0 ? ` 予想が出ていなかった${v.noForecastDays}営業日は除いています。` : ""}
+      </p>
+    </div>
+  );
+}
+
+// 判断シート。投資するかどうかを決めるときに先に見たい点を、レポートの冒頭に1行ずつ並べる。
+// 「会社の質」（分析のランク）と「株価の位置」（過去のPERとの比較）は別の軸として並べて出す。
+const SHEET_MARK_CLASS = { "○": "sheet-good", "△": "sheet-mid", "×": "sheet-bad", "不明": "sheet-na" };
+
+// 得意先の直近の決算。数字は J-Quants の決算短信データをそのまま並べる（モデルは通さない）。
+function CustomersTable({ rows, busy, error, onAdd, onRemove }) {
+  const [text, setText] = useState("");
+  const submit = (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    onAdd(text.trim());
+    setText("");
+  };
+  const profit = (c) => {
+    const y = c.yoy;
+    if (!y) return "—";
+    if (y.op != null) return `営業利益 ${pct(y.op)}`;
+    if (y.opNote) return `営業利益 ${y.opNote}`;
+    if (y.np != null) return `純利益 ${pct(y.np)}`;
+    return "—";
+  };
+  const upDown = (n) => (n == null ? "" : n >= 0 ? "val-up" : "val-down");
+  return (
+    <div className="cust">
+      <div className="perf-head">
+        <strong className="perf-title">🤝 得意先の決算</strong>
+        <span className="tech-meta">資料に社名が出ている販売先と、手で足した会社の直近の決算（J-Quants）</span>
+      </div>
+      {rows?.length > 0 && (
+        <div className="perf-scroll">
+          <table className="perf-table sheet-table">
+            <thead>
+              <tr>
+                <th>得意先</th><th></th><th>直近の決算（前年同期比）</th>
+                <th>今期の会社予想</th><th>株価</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.code || c.name}>
+                  <th scope="row" className="tech-rowhead">
+                    {c.listedName || c.name}
+                    <span className="tech-rowsub">
+                      {c.code ? `${c.code.slice(0, 4)}／` : ""}{c.note || ""}
+                    </span>
+                  </th>
+                  {c.unresolved || c.error ? (
+                    <>
+                      <td className="sheet-mark sheet-na">—</td>
+                      <td colSpan={3} className="sheet-evidence">{c.unresolved || c.error}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className={`sheet-mark ${SHEET_MARK_CLASS[c.mark] || "sheet-na"}`}>{c.mark === "不明" ? "—" : c.mark}</td>
+                      <td>
+                        {c.yoy ? (
+                          <>
+                            売上 <span className={upDown(c.yoy.sales)}>{pct(c.yoy.sales)}</span>
+                            ／<span className={upDown(c.yoy.op ?? c.yoy.np)}>{profit(c)}</span>
+                          </>
+                        ) : "前年同期のデータなし"}
+                        <span className="tech-cellsub">{c.period}（{c.disclosed} 開示）</span>
+                      </td>
+                      <td>
+                        {c.forecast ? (
+                          <>
+                            {c.forecast.basis} 前期比 <span className={upDown(c.forecast.growthPct)}>{pct(c.forecast.growthPct)}</span>
+                            <span className="tech-cellsub">
+                              期初予想から {c.forecast.revisionPct == null ? "—" : Math.abs(c.forecast.revisionPct) < 0.05 ? "据え置き" : `${pct(c.forecast.revisionPct)}（${c.forecast.revisionPct > 0 ? "上方" : "下方"}修正）`}
+                            </span>
+                          </>
+                        ) : "通期予想の開示なし"}
+                      </td>
+                      <td>
+                        {c.price ? (
+                          <>
+                            1年 <span className={upDown(c.price.y1)}>{pct(c.price.y1)}</span>
+                            <span className="tech-cellsub">3ヶ月 {pct(c.price.m3)}</span>
+                          </>
+                        ) : "—"}
+                      </td>
+                    </>
+                  )}
+                  <td className="sheet-source">
+                    {c.manual
+                      ? <button type="button" className="cust-remove" onClick={() => onRemove(c.name)} title="この会社を一覧から外します">外す</button>
+                      : c.source}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!busy && !(rows?.length > 0) && (
+        <p className="tech-note">資料に販売先の社名が出ていませんでした。下の欄から得意先を足せます。</p>
+      )}
+      {busy && <p className="hint">得意先の決算を取得中...</p>}
+      {error && <div className="error">{error}</div>}
+      <form className="cust-add" onSubmit={submit}>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="得意先を足す（会社名か証券コード。例：イビデン、4062）"
+        />
+        <button type="submit" className="preset-btn" disabled={busy || !text.trim()}>追加</button>
+      </form>
+      <p className="tech-note">
+        ○△×は「直近の利益の増減」と「会社予想の修正の向き」を足しただけの機械的な印です。
+        国内の上場会社だけが対象で、海外・非上場の得意先は決算を取れません。
+        有価証券報告書に社名が載るのは売上の10%以上を占める販売先だけなので、それ以外は手で足してください。
+      </p>
+    </div>
+  );
+}
+
+function DecisionSheet({ sheet, busy, error, rank, technicalData, technicalBusy, customers }) {
+  const v = technicalData?.valuation && !technicalData.valuation.error ? technicalData.valuation : null;
+  const vError = technicalData?.valuation?.error;
+  const j = technicalData?.technical?.judgement;
+
+  // 7行目「株価の位置」は数字から計算した結果をそのまま出す（モデルには書かせない）
+  const priceRow = v
+    ? {
+        mark: { A: "○", B: "○", C: "△", D: "×" }[v.grade],
+        point: `予想PER ${v.per.toFixed(1)}倍は過去の下から${Math.round(v.positionPct)}%の位置（${v.gradeLabel}）`,
+        evidence:
+          `過去の中央値 ${v.band.median.toFixed(1)}倍、最低 ${v.band.min.toFixed(1)}倍、最高 ${v.band.max.toFixed(1)}倍。` +
+          (v.oneYear
+            ? `この1年の株価 ${pct(v.oneYear.pricePct)} の内訳は 予想EPS ${pct(v.oneYear.epsPct)} × PER ${pct(v.oneYear.perPct)}。`
+            : "") +
+          (j ? `週足・月足の判定は「${j.verdict}」。` : ""),
+        source: "J-Quants（株価・決算短信の会社予想）",
+      }
+    : {
+        mark: "不明",
+        point: technicalBusy ? "株価を確認中..." : vError || "証券コードを入れて「いま買う位置か確認する」を押すと出ます",
+        evidence: j ? `週足・月足の判定は「${j.verdict}」。` : "",
+        source: "",
+      };
+
+  const rows = [
+    ...(sheet?.items || []),
+    { key: "price", label: "株価の位置", source_kind: "株価データ", ...priceRow },
+  ];
+
+  return (
+    <div className="sheet">
+      <div className="sheet-grades">
+        <div className={`sheet-grade rank-${rank?.tone || "na"}`}>
+          <span className="sheet-grade-kicker">会社の質</span>
+          <span className="sheet-grade-mark">{rank?.letter || "—"}</span>
+          <span className="sheet-grade-note">{rank?.label || "分析のランク"}</span>
+        </div>
+        <div className={`sheet-grade rank-${v ? v.grade.toLowerCase() : "na"}`}>
+          <span className="sheet-grade-kicker">株価の位置</span>
+          <span className="sheet-grade-mark">{v ? v.grade : "—"}</span>
+          <span className="sheet-grade-note">
+            {v ? `${v.gradeLabel}（予想PER ${v.per.toFixed(1)}倍）` : "過去のPERとの比較"}
+          </span>
+        </div>
+      </div>
+
+      {sheet?.headline && <p className="sheet-headline">{sheet.headline}</p>}
+      {busy && <p className="hint">判断シートを作成中...（分析と資料から要点を拾っています）</p>}
+      {error && <div className="error">判断シート: {error}</div>}
+
+      {(sheet || v) && (
+        <div className="perf-scroll">
+          <table className="perf-table sheet-table">
+            <thead>
+              <tr><th>見るポイント</th><th></th><th>結論と根拠</th><th>出どころ</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key}>
+                  <th scope="row" className="tech-rowhead">{r.label}</th>
+                  <td className={`sheet-mark ${SHEET_MARK_CLASS[r.mark] || "sheet-na"}`}>{r.mark === "不明" ? "—" : r.mark}</td>
+                  <td className="sheet-body">
+                    <div className="sheet-point">{r.point}</div>
+                    {r.evidence && <div className="sheet-evidence">{r.evidence}</div>}
+                  </td>
+                  <td className="sheet-source">
+                    <span className="sheet-kind">{r.source_kind}</span>
+                    {r.source && <span className="sheet-src">{r.source}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {customers}
+      <p className="tech-note">
+        上の6行は分析と資料に書かれていることを拾って並べ直したもので、材料が無い項目は「—」です。
+        「会社の質」は分析のランク、「株価の位置」は過去のPERの分布から機械的に付けた評価で、
+        どちらも売買の推奨ではありません。
+      </p>
+    </div>
+  );
+}
+
 function TechnicalPanel({ data }) {
   if (!data?.technical) return null;
   const { technical: t, name, code, matchedBy } = data;
@@ -931,6 +1294,12 @@ export default function Home() {
   const [technical, setTechnical] = useState(null);
   const [technicalBusy, setTechnicalBusy] = useState(false);
   const [technicalError, setTechnicalError] = useState("");
+  const [sheet, setSheet] = useState(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetError, setSheetError] = useState("");
+  const [customers, setCustomers] = useState(null);
+  const [customersBusy, setCustomersBusy] = useState(false);
+  const [customersError, setCustomersError] = useState("");
   const [codeChoices, setCodeChoices] = useState([]);
   const [analysis, setAnalysis] = useState("");
   // 表示中の分析が「保存済みファイルから復元したもの」のときの保存時刻
@@ -1409,6 +1778,66 @@ export default function Home() {
       setMetricsBusy(false);
     }
   }
+
+  // 得意先の決算を取りに行く。資料から拾った社名（判断シートの customers）と、手で足した会社が対象。
+  async function loadCustomers({ add, remove, extracted } = {}) {
+    const company = companyName.trim();
+    if (!company) return;
+    setCustomersBusy(true);
+    setCustomersError("");
+    try {
+      const res = await fetch("/api/customers-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: company,
+          tickerCode,
+          extracted: extracted || sheet?.customers || [],
+          add,
+          remove,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "得意先の決算を取得できませんでした");
+      setCustomers(data.customers);
+    } catch (e) {
+      setCustomersError(e.message);
+    } finally {
+      setCustomersBusy(false);
+    }
+  }
+
+  // 分析が出たら（新しく作ったときも、保存済みを開いたときも）判断シートを用意する。
+  // 同じ分析に対して作成済みならサーバー側が保存してあるものを返すので、毎回作り直しにはならない。
+  useEffect(() => {
+    const company = companyName.trim();
+    if (!analysis || !company) { setSheet(null); setSheetError(""); setCustomers(null); return; }
+    let cancelled = false;
+    setSheet(null);
+    setCustomers(null);
+    setCustomersError("");
+    setSheetError("");
+    setSheetBusy(true);
+    fetchLongRunning("/api/sheet-local", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ companyName: company, analysis }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data.error || "判断シートを作成できませんでした");
+        setSheet(data.sheet);
+        loadCustomers({ extracted: data.sheet?.customers || [] });
+      })
+      .catch((e) => { if (!cancelled) setSheetError(e.message); })
+      .finally(() => { if (!cancelled) setSheetBusy(false); });
+    // 株価の位置がまだ無ければ一緒に取りに行く
+    if (!technical && !technicalBusy) fetchTechnical(company, tickerCode);
+    return () => { cancelled = true; };
+    // 分析本文が変わったときだけ作り直す
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis]);
 
   // 株価の位置（週足・月足）を取りに行く。分析とは独立して失敗してよい。
   async function fetchTechnical(companyArg, tickerArg) {
@@ -2215,6 +2644,32 @@ export default function Home() {
           </p>
         )}
 
+        {/* 判断シート。投資判断の前に見たい点を、結果のいちばん上に出す */}
+        {analysis && (
+          <div className="chat">
+            <div className="msg-ai">
+              <strong>🧭 判断シート（先に見るポイント）</strong>
+              <DecisionSheet
+                sheet={sheet}
+                busy={sheetBusy}
+                error={sheetError}
+                rank={rankView.rank}
+                technicalData={technical}
+                technicalBusy={technicalBusy}
+                customers={
+                  <CustomersTable
+                    rows={customers}
+                    busy={customersBusy}
+                    error={customersError}
+                    onAdd={(text) => loadCustomers({ add: text })}
+                    onRemove={(name) => loadCustomers({ remove: name })}
+                  />
+                }
+              />
+            </div>
+          </div>
+        )}
+
         {/* 業績表（売上・営業利益・経常利益の推移と会社予想）。
             いちばん見たい数字なので、事実サマリーの本文より先に置く。 */}
         {metricsBusy && <p className="hint">業績表を作成中...</p>}
@@ -2251,7 +2706,7 @@ export default function Home() {
             onClick={() => fetchTechnical()}
             disabled={technicalBusy}
             className="preset-btn"
-            title="週足・月足の移動平均乖離とボリンジャーバンドから、いま買う位置かを確認します"
+            title="過去のPERとの比較と、週足・月足の移動平均乖離・ボリンジャーバンドから、いま買う位置かを確認します"
           >
             {technicalBusy ? "株価を確認中..." : "📉 いま買う位置か確認する"}
           </button>
@@ -2275,6 +2730,7 @@ export default function Home() {
         {technical && (
           <div className="chat">
             <div className="msg-ai">
+              <ValuationPanel data={technical} />
               <TechnicalPanel data={technical} />
             </div>
           </div>

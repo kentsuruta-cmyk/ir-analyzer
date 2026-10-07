@@ -916,3 +916,69 @@ body {
   padding: 1px 7px;
   white-space: nowrap;
 }
+
+/* ── 過去のPERと比べた株価の位置 ─────────────────────────── */
+.val-chart { width: 100%; height: auto; margin: 10px 0 4px; display: block; }
+.val-line { fill: none; stroke: #2b6cb0; stroke-width: 1.6; }
+.val-dot { fill: #2b6cb0; stroke: #fff; stroke-width: 1.5; }
+.val-bandfill { fill: #e2e8f0; opacity: .6; }
+.val-guide { stroke: #cbd5e1; stroke-width: 1; }
+.val-median { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 3; }
+.val-grid { stroke: #eef2f7; stroke-width: 1; }
+.val-axis { font-size: 9px; fill: #64748b; }
+.val-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .val-cols { grid-template-columns: 1fr; } }
+.val-up { color: #15803d; }
+.val-down { color: #b91c1c; }
+.val-input {
+  width: 52px; padding: 2px 4px; margin-right: 2px; text-align: right;
+  border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12px;
+}
+
+/* ── 判断シート ─────────────────────────────────────────── */
+.sheet { margin: 12px 0 18px; }
+.sheet-grades { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 640px) { .sheet-grades { grid-template-columns: 1fr; } }
+.sheet-grade {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-items: center;
+  border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; background: #fff;
+}
+.sheet-grade-kicker { grid-column: 2; font-size: 11px; color: #64748b; font-weight: 700; }
+.sheet-grade-mark { grid-row: 1 / span 2; font-size: 30px; font-weight: 800; line-height: 1; color: #0f172a; }
+.sheet-grade-note { grid-column: 2; font-size: 12px; color: #334155; }
+.sheet-grade.rank-a { border-color: #86efac; background: #f0fdf4; }
+.sheet-grade.rank-b { border-color: #93c5fd; background: #eff6ff; }
+.sheet-grade.rank-c { border-color: #fcd34d; background: #fffbeb; }
+.sheet-grade.rank-d { border-color: #fca5a5; background: #fef2f2; }
+.sheet-headline { margin: 10px 0 8px; font-size: 13px; font-weight: 700; color: #0f172a; line-height: 1.6; }
+.sheet-table td { text-align: left; vertical-align: top; }
+.sheet-table .sheet-mark { text-align: center; font-size: 18px; font-weight: 800; width: 40px; }
+.sheet-good { color: #15803d; }
+.sheet-mid { color: #b45309; }
+.sheet-bad { color: #b91c1c; }
+.sheet-na { color: #94a3b8; }
+.sheet-point { font-weight: 700; color: #0f172a; font-size: 13px; }
+.sheet-evidence { margin-top: 3px; font-size: 12px; color: #475569; line-height: 1.6; }
+.sheet-source { font-size: 11px; color: #64748b; min-width: 110px; }
+.sheet-kind { display: block; font-weight: 700; }
+.sheet-src { display: block; margin-top: 2px; color: #94a3b8; }
+.sheet-table { width: 100%; }
+.sheet-table td, .sheet-table th { white-space: normal; }
+.sheet-table .tech-rowhead { white-space: nowrap; }
+
+/* ── 得意先の決算 ───────────────────────────────────────── */
+.cust { margin-top: 16px; }
+.cust-add { display: flex; gap: 8px; margin-top: 8px; }
+.cust-add input {
+  flex: 1; max-width: 360px; padding: 6px 10px; font-size: 12px;
+  border: 1px solid #cbd5e1; border-radius: 7px;
+}
+.cust-remove {
+  border: 1px solid #cbd5e1; background: #fff; color: #64748b;
+  border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+}
+.cust-remove:hover { border-color: #fca5a5; color: #b91c1c; }
+.cust .sheet-table .tech-rowhead { white-space: normal; width: 26%; min-width: 150px; }
+.cust .sheet-table td { white-space: nowrap; }
+.cust .sheet-table td.sheet-source, .cust .sheet-table td.sheet-evidence { white-space: normal; }
+.cust .sheet-table td.sheet-source { min-width: 0; width: 15%; }

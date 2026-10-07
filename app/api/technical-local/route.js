@@ -1,8 +1,11 @@
-import { resolveCode, fetchDailyBars } from "../../../lib/jquants.js";
+import { resolveCode, fetchDailyBars, fetchStatements } from "../../../lib/jquants.js";
 import { computeTechnical } from "../../../lib/technical.js";
+import { computeValuation } from "../../../lib/valuation.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+
+const HISTORY_DAYS = 1815;
 
 // 「良い会社を、伸び切ったところで買わない」ための位置確認。
 // 週足・月足の移動平均乖離とボリンジャーバンドのσ位置だけを見る。
@@ -38,15 +41,26 @@ export async function GET(request) {
       return Response.json({ ambiguous: resolved.ambiguous }, { status: 409 });
     }
 
-    const daily = await fetchDailyBars({ code: resolved.code, days: 1100 });
+    // 過去のPERと比べるために5年分を取る（週足・月足の判定も同じデータで行う）。
+    // 契約プランで取れるのがちょうど5年前までなので、境界で400にならないよう数日手前から。
+    const daily = await fetchDailyBars({ code: resolved.code, days: HISTORY_DAYS });
     const technical = computeTechnical(daily);
     if (technical.error) return Response.json({ error: technical.error }, { status: 422 });
+
+    // 過去のPERとの比較。取れなくても週足・月足の判定はそのまま返す。
+    let valuation;
+    try {
+      valuation = computeValuation(daily, await fetchStatements({ code: resolved.code }));
+    } catch (e) {
+      valuation = { error: `決算データを取得できませんでした: ${e.message}` };
+    }
 
     return Response.json({
       code: resolved.code,
       name: resolved.name,
       matchedBy: resolved.matchedBy,
       technical,
+      valuation,
     });
   } catch (e) {
     return Response.json({ error: `エラー: ${e.message}` }, { status: 500 });
